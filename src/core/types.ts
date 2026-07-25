@@ -235,4 +235,12 @@ export interface MarketDataBundle {
   source: string;
   requiredCutoff: IsoDate;
   series: Record<string, MarketSeries>;
+  normalization?: {
+    rawDataPath: string;
+    priceBasis: string;
+    splits: Record<
+      string,
+      Array<{ date: IsoDate; ratio: number; source: string }>
+    >;
+  };
 }

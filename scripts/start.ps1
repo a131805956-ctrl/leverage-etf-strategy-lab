@@ -10,11 +10,9 @@ $marketFile = Join-Path $projectRoot "public\data\market.json"
 $refresh = -not (Test-Path -LiteralPath $marketFile)
 if (-not $refresh) {
   $bundle = Get-Content -Raw -LiteralPath $marketFile | ConvertFrom-Json
-  $latest = ($bundle.series.PSObject.Properties.Value | ForEach-Object {
-    $_.bars[-1].date
-  } | Sort-Object | Select-Object -First 1)
   $required = (Get-Date -Day 1).AddDays(-1).ToString("yyyy-MM-dd")
-  $refresh = $latest -lt $required
+  $coveredThrough = $bundle.requiredCutoff
+  $refresh = -not $coveredThrough -or $coveredThrough -lt $required
 }
 
 if ($refresh) {

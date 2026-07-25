@@ -12,7 +12,11 @@ import type {
 } from '../core/types';
 import { PAIRS, pairById } from '../config/pairs';
 import { loadMarketData } from '../data/client';
-import { needsRefresh, requiredTradingCutoff } from '../data/freshness';
+import {
+  coversCutoffMonth,
+  needsRefresh,
+  requiredCutoff,
+} from '../data/freshness';
 import { gridSearch } from '../optimization/gridSearch';
 import { paretoFront } from '../optimization/pareto';
 import { IndexedDbScenarioRepository } from '../storage/indexedDbRepository';
@@ -404,11 +408,14 @@ export class StrategyLabApp {
 
   private renderDataHealth(): void {
     if (!this.bundle) return;
-    const cutoff = requiredTradingCutoff();
+    const cutoff = requiredCutoff();
+    const snapshotStale = needsRefresh(this.bundle.requiredCutoff);
     const rows = PAIRS.flatMap((pair) => [pair.prototype.symbol, pair.leveraged.symbol]).map((symbol) => {
       const series = this.bundle?.series[symbol];
       const latest = series?.bars.at(-1)?.date;
-      const stale = needsRefresh(latest);
+      const stale =
+        snapshotStale ||
+        !coversCutoffMonth(latest, this.bundle?.requiredCutoff ?? cutoff);
       return `<tr><td>${symbol.replace('.TW', '')}</td><td class="data">${series?.bars.length ?? 0}</td><td>${latest ?? '—'}</td><td class="${stale ? 'danger' : ''}">${stale ? '需更新' : '完整'}</td></tr>`;
     });
     this.get('data-health').innerHTML = `<table><thead><tr><th>標的</th><th>筆數</th><th>最後資料</th><th>狀態</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
