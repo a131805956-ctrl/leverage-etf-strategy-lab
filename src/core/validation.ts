@@ -1,0 +1,60 @@
+import type { StrategyConfig } from './types';
+
+const inPercentRange = (value: number): boolean =>
+  Number.isFinite(value) && value >= 0 && value <= 100;
+
+const hasDuplicates = (values: number[]): boolean =>
+  new Set(values).size !== values.length;
+
+export function validateStrategy(strategy: StrategyConfig): string[] {
+  const errors: string[] = [];
+
+  if (!strategy.name.trim()) errors.push('策略名稱不可空白');
+  if (!inPercentRange(strategy.baseLeveragedWeight)) {
+    errors.push('基礎槓桿 ETF 權重必須介於 0% 到 100%');
+  }
+  if (!inPercentRange(strategy.highLeveragedWeight)) {
+    errors.push('創新高槓桿 ETF 權重必須介於 0% 到 100%');
+  }
+  if (hasDuplicates(strategy.drawdownRules.map((rule) => rule.threshold))) {
+    errors.push('回撤門檻不可重複');
+  }
+  if (hasDuplicates(strategy.recoveryRules.map((rule) => rule.distanceToHigh))) {
+    errors.push('反彈門檻不可重複');
+  }
+  if (
+    strategy.drawdownRules.some(
+      (rule) =>
+        rule.threshold <= 0 ||
+        rule.threshold > 100 ||
+        !inPercentRange(rule.leveragedWeight),
+    )
+  ) {
+    errors.push('回撤規則的門檻與權重必須介於有效範圍');
+  }
+  if (
+    strategy.recoveryRules.some(
+      (rule) =>
+        rule.distanceToHigh < 0 ||
+        rule.distanceToHigh > 100 ||
+        !inPercentRange(rule.leveragedWeight),
+    )
+  ) {
+    errors.push('反彈規則的門檻與權重必須介於有效範圍');
+  }
+  if (strategy.execution !== 'next-open') {
+    errors.push('正式回測只允許下一交易日開盤成交');
+  }
+  if (strategy.costs.enabled) {
+    const costValues = [
+      strategy.costs.commissionRate,
+      strategy.costs.sellTaxRate,
+      strategy.costs.slippageRate,
+      strategy.costs.minimumCommission,
+    ];
+    if (costValues.some((value) => !Number.isFinite(value) || value < 0)) {
+      errors.push('交易成本不可為負數');
+    }
+  }
+  return errors;
+}
