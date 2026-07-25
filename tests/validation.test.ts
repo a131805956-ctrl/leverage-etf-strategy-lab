@@ -54,7 +54,10 @@ describe('validateStrategy', () => {
   });
 
   it('requires the next-open execution model', () => {
-    const strategy = { ...validStrategy, execution: 'same-close' as const };
+    const strategy = {
+      ...validStrategy,
+      execution: 'same-close',
+    } as unknown as StrategyConfig;
     expect(validateStrategy(strategy)).toContain('正式回測只允許下一交易日開盤成交');
   });
 });

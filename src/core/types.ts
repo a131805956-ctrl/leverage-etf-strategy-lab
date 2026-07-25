@@ -177,6 +177,10 @@ export interface BacktestInput {
   endDate: IsoDate;
   initialCapital: number;
   annualRiskFreeRate?: number;
+  dividendReinvestments?: Array<{
+    date: IsoDate;
+    target: 'prototype' | 'leveraged' | 'target-allocation';
+  }>;
 }
 
 export interface PortfolioAllocation {
