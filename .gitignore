@@ -11,7 +11,7 @@ coverage/
 .worktrees/
 output/
 playwright-report/
+.playwright-cli/
 test-results/
 *.log
 *.tsbuildinfo
-

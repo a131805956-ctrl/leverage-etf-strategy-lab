@@ -1,0 +1,63 @@
+import { describe, expect, it } from 'vitest';
+
+import { validateStrategy } from '../src/core/validation';
+import type { StrategyConfig } from '../src/core/types';
+
+const validStrategy: StrategyConfig = {
+  id: 'balanced-drawdown',
+  name: '回撤階梯',
+  pairId: 'tw50',
+  baseLeveragedWeight: 70,
+  highLeveragedWeight: 70,
+  drawdownRules: [
+    { threshold: 10, leveragedWeight: 80 },
+    { threshold: 20, leveragedWeight: 90 },
+    { threshold: 30, leveragedWeight: 100 },
+  ],
+  recoveryRules: [
+    { distanceToHigh: 20, leveragedWeight: 90 },
+    { distanceToHigh: 10, leveragedWeight: 80 },
+    { distanceToHigh: 5, leveragedWeight: 70 },
+  ],
+  recoveryConfirmationPct: 5,
+  rebalance: { mode: 'event', driftThreshold: 5 },
+  dividendMode: 'total-return',
+  execution: 'next-open',
+  costs: {
+    enabled: false,
+    commissionRate: 0,
+    sellTaxRate: 0,
+    slippageRate: 0,
+    minimumCommission: 0,
+  },
+};
+
+describe('validateStrategy', () => {
+  it('accepts a valid strategy', () => {
+    expect(validateStrategy(validStrategy)).toEqual([]);
+  });
+
+  it('rejects weights outside 0 to 100', () => {
+    const strategy = { ...validStrategy, baseLeveragedWeight: 101 };
+    expect(validateStrategy(strategy)).toContain('基礎槓桿 ETF 權重必須介於 0% 到 100%');
+  });
+
+  it('rejects duplicate drawdown thresholds', () => {
+    const strategy = {
+      ...validStrategy,
+      drawdownRules: [
+        ...validStrategy.drawdownRules,
+        { threshold: 20, leveragedWeight: 95 },
+      ],
+    };
+    expect(validateStrategy(strategy)).toContain('回撤門檻不可重複');
+  });
+
+  it('requires the next-open execution model', () => {
+    const strategy = {
+      ...validStrategy,
+      execution: 'same-close',
+    } as unknown as StrategyConfig;
+    expect(validateStrategy(strategy)).toContain('正式回測只允許下一交易日開盤成交');
+  });
+});
