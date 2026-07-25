@@ -9,6 +9,7 @@ export default defineConfig({
   preview: {
     port: 4175,
     strictPort: true,
+    allowedHosts: ['desktop-loi23mp.tail9c076e.ts.net'],
   },
   test: {
     environment: 'node',
