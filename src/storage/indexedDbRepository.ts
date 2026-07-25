@@ -29,8 +29,11 @@ export class IndexedDbScenarioRepository implements ScenarioRepository {
 
   async list(): Promise<SavedScenario[]> {
     const database = await this.database;
-    const request = database.transaction(STORE).objectStore(STORE).getAll();
-    const scenarios = await requestAsPromise(request);
+    const request = database
+      .transaction(STORE)
+      .objectStore(STORE)
+      .getAll() as IDBRequest<SavedScenario[]>;
+    const scenarios = await requestAsPromise<SavedScenario[]>(request);
     return scenarios.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
@@ -56,7 +59,10 @@ export class IndexedDbScenarioRepository implements ScenarioRepository {
 
   async get(id: string): Promise<SavedScenario | undefined> {
     const database = await this.database;
-    const request = database.transaction(STORE).objectStore(STORE).get(id);
-    return requestAsPromise(request);
+    const request = database
+      .transaction(STORE)
+      .objectStore(STORE)
+      .get(id) as IDBRequest<SavedScenario | undefined>;
+    return requestAsPromise<SavedScenario | undefined>(request);
   }
 }

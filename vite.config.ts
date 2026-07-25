@@ -1,7 +1,7 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
-export default defineConfig(({ command }) => ({
-  base: command === 'build' ? '/leverage-etf/' : '/',
+export default defineConfig({
+  base: '/leverage-etf/',
   server: {
     port: 5175,
     strictPort: true,
@@ -16,4 +16,4 @@ export default defineConfig(({ command }) => ({
       reporter: ['text', 'html'],
     },
   },
-}));
+});

@@ -42,21 +42,25 @@ export class MemoryScenarioRepository implements ScenarioRepository {
   private readonly scenarios = new Map<string, SavedScenario>();
 
   async list(): Promise<SavedScenario[]> {
-    return [...this.scenarios.values()].sort((a, b) =>
-      b.updatedAt.localeCompare(a.updatedAt),
+    return Promise.resolve(
+      [...this.scenarios.values()].sort((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt),
+      ),
     );
   }
 
   async save(scenario: SavedScenario): Promise<void> {
     this.scenarios.set(scenario.id, scenario);
+    return Promise.resolve();
   }
 
   async remove(id: string): Promise<void> {
     this.scenarios.delete(id);
+    return Promise.resolve();
   }
 
   async get(id: string): Promise<SavedScenario | undefined> {
-    return this.scenarios.get(id);
+    return Promise.resolve(this.scenarios.get(id));
   }
 }
 

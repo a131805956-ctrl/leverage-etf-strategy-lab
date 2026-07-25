@@ -3,11 +3,18 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'coverage/**', 'public/data/**', '.superpowers/**'],
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'public/data/**',
+      '.superpowers/**',
+      'eslint.config.js',
+      'scripts/**/*.mjs',
+    ],
   },
-  js.configs.recommended,
-  ...tseslint.configs.recommendedTypeChecked,
   {
+    files: ['**/*.ts'],
+    extends: [js.configs.recommended, ...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
         projectService: true,
