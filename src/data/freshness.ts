@@ -19,18 +19,19 @@ export function requiredCutoff(now = new Date()): IsoDate {
   return isoUtc(new Date(Date.UTC(year, month - 1, 0)));
 }
 
-export function requiredTradingCutoff(now = new Date()): IsoDate {
-  const cutoff = new Date(`${requiredCutoff(now)}T00:00:00Z`);
-  const day = cutoff.getUTCDay();
-  if (day === 6) cutoff.setUTCDate(cutoff.getUTCDate() - 1);
-  if (day === 0) cutoff.setUTCDate(cutoff.getUTCDate() - 2);
-  return isoUtc(cutoff);
+export function coversCutoffMonth(
+  latestDataDate: IsoDate | undefined,
+  cutoff: IsoDate,
+): boolean {
+  if (!latestDataDate) return false;
+  const monthStart = `${cutoff.slice(0, 7)}-01` as IsoDate;
+  return latestDataDate >= monthStart;
 }
 
 export function needsRefresh(
-  latestDataDate: IsoDate | undefined,
+  coveredThrough: IsoDate | undefined,
   now = new Date(),
 ): boolean {
-  if (!latestDataDate) return true;
-  return latestDataDate < requiredTradingCutoff(now);
+  if (!coveredThrough) return true;
+  return coveredThrough < requiredCutoff(now);
 }

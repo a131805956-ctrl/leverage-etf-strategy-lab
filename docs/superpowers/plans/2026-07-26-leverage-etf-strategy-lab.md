@@ -4,7 +4,7 @@
 
 **Goal:** 建立可公開部署、可重現、可擴充的槓桿 ETF 單組與多組策略回測網站。
 
-**Architecture:** Vite/TypeScript 前端以純函數領域核心處理回測、規則、指標與跨組組合；UI、資料來源、儲存與圖表只透過型別化介面使用核心。Node 資料服務負責 Yahoo 月度補抓與靜態發布，IndexedDB 保存訪客自己的方案。
+**Architecture:** Vite/TypeScript 前端以純函數領域核心處理回測、規則、指標與跨組組合；UI、資料來源、儲存與圖表只透過型別化介面使用核心。Node 資料服務負責 TWSE 月度補抓、企業行動轉換與靜態發布，IndexedDB 保存訪客自己的方案。
 
 **Tech Stack:** TypeScript 5、Vite、Vitest、ESLint、TradingView Lightweight Charts、Node.js、IndexedDB、GitHub Actions、Tailscale Funnel。
 
@@ -109,7 +109,7 @@
 
 - [ ] 寫入上月月底、最近交易日、足夠資料不重抓及 JSON schema 驗證測試。
 - [ ] 執行測試並確認失敗。
-- [ ] 實作 Yahoo adapter、檔案快取、API、CSV 匯入與 IndexedDB repository。
+- [ ] 實作 TWSE adapter、原始／衍生檔案快取、API、CSV 匯入與 IndexedDB repository。
 - [ ] 建立開發用快照資料，沒有網路時仍可展示。
 - [ ] 執行測試，確認通過。
 - [ ] Commit：`feat: add monthly market data pipeline`

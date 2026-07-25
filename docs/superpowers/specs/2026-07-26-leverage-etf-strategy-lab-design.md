@@ -12,7 +12,7 @@
 - 美股代理組：00646／00647L。
 - 各交易對獨立策略回測。
 - 多交易對策略合併與跨組再平衡。
-- Yahoo Finance 歷史資料、月度補抓與本機快取。
+- TWSE 衍生歷史快照、證交所月度補抓與可稽核原始快取。
 - 專業圖表、績效與風險分析、方案比較。
 - 本機最佳化與 ChatGPT 分析包，不依賴 API 金鑰。
 - GitHub Public Repository、PR／Commit／Tag／CI 維護。
@@ -24,7 +24,7 @@
 
 ### 2.1 資料
 
-- 正式資料源為 Yahoo Finance chart API。
+- 歷史基準採 FinMind 的 TWSE 衍生批次資料，並以 TWSE 官方日成交與分割公告驗證；後續增量直接取自 TWSE。
 - 儲存開盤、最高、最低、收盤、還原收盤、成交量、股息與拆分事件。
 - 首次建立完整快取；後續啟動時只在資料未涵蓋到「上個月月底」時補抓。
 - 例如 8 月 1 日啟動時，必要截止日為 7 月 31 日；若當日非交易日，接受最近交易日。
@@ -184,7 +184,7 @@
 - 線性／對數座標。
 - 點選兩點量測報酬、價格與天數。
 - Hover 數值、標記、重設縮放與面板切換。
-- Yahoo 即時補抓與資料狀態。
+- TWSE 月度補抓、企業行動校正與資料狀態。
 
 新增：
 
@@ -218,7 +218,7 @@
 - Web Worker 執行最佳化，避免阻塞 UI。
 - Vitest 測試純函數回測、規則、指標、資料及組合層。
 - Playwright CLI 執行桌機與手機核心流程、截圖與視覺 QA。
-- Node 資料服務負責 Yahoo 補抓、快取及本機靜態服務。
+- Node 資料服務負責 TWSE 增量補抓、原始／衍生雙快取及本機靜態服務。
 
 主要邊界：
 
@@ -229,7 +229,7 @@ UI
  ├─ OptimizationService ─ Worker
  ├─ ChartAdapter ─ Lightweight Charts
  ├─ StrategyRepository ─ IndexedDB
- └─ DataClient ─ Local Data API ─ YahooProvider ─ File Cache
+ └─ DataClient ─ TWSE Monthly Provider ─ Raw/Derived File Cache
 ```
 
 ## 12. GitHub、部署與維護
