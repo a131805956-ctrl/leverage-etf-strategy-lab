@@ -19,6 +19,11 @@ const drawerSource = appSource.slice(
   appSource.indexOf('<aside class="drawer"'),
   appSource.indexOf('</aside>'),
 );
+const visibleFormControls = [
+  ...appSource.matchAll(/<(?:input|select)\b[^>]*>/g),
+]
+  .map((match) => match[0])
+  .filter((control) => !/\shidden(?:\s|>)/.test(control));
 
 describe('resolveRebalanceSelection', () => {
   it.each([
@@ -108,20 +113,28 @@ describe('strategy drawer accessibility markup', () => {
     }
   });
 
-  it('gives the new strategy controls names and disables autocomplete', () => {
-    for (const id of [
-      'allocation-policy',
-      'rebalance',
-      'custom-rebalance-days',
-      'drift-threshold',
-    ]) {
-      const control = drawerSource.match(
-        new RegExp(`<(?:input|select)[^>]*id="${id}"[^>]*>`),
-      )?.[0];
+  it('gives every visible input and select an accessible name', () => {
+    const missingAccessibleNames = visibleFormControls
+      .filter((control) => {
+        if (/\baria-label="[^"]+"/.test(control)) return false;
+        const id = control.match(/\bid="([^"]+)"/)?.[1];
+        return !id || !appSource.includes(`for="${id}"`);
+      })
+      .map((control) => control.match(/\bid="([^"]+)"/)?.[1] ?? control);
 
-      expect(control).toContain(`name="${id}"`);
-      expect(control).toContain('autocomplete="off"');
-    }
+    expect(missingAccessibleNames).toEqual([]);
+  });
+
+  it('gives every visible input and select form metadata', () => {
+    const missingMetadata = visibleFormControls
+      .filter(
+        (control) =>
+          !/\bname="[^"]+"/.test(control) ||
+          !/\bautocomplete="off"/.test(control),
+      )
+      .map((control) => control.match(/\bid="([^"]+)"/)?.[1] ?? control);
+
+    expect(missingMetadata).toEqual([]);
   });
 
   it('names icon buttons and exposes live status updates', () => {

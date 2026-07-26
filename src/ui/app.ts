@@ -152,12 +152,12 @@ export class StrategyLabApp {
               <div class="portfolio-builder">
                 <section class="panel card-body">
                   <h2>組合設定</h2>
-                  <div class="field"><label>台股策略</label><select id="portfolio-tw"></select></div>
-                  <div class="field"><label>台股目標權重</label><input id="portfolio-tw-weight" type="number" value="40" min="0" max="100"></div>
-                  <div class="field"><label>美股策略</label><select id="portfolio-us"></select></div>
-                  <div class="field"><label>美股目標權重</label><input id="portfolio-us-weight" type="number" value="60" min="0" max="100"></div>
-                  <div class="field"><label>跨組再平衡</label><select id="portfolio-rebalance"><option value="annual">每年</option><option value="quarterly">每季</option><option value="monthly">每月</option><option value="drift">偏離門檻</option><option value="none">不再平衡</option></select></div>
-                  <div class="field"><label>偏離門檻（百分點）</label><input id="portfolio-drift" type="number" value="10" min="1" max="50"></div>
+                  <div class="field"><label for="portfolio-tw">台股策略</label><select id="portfolio-tw" name="portfolio-tw" autocomplete="off"></select></div>
+                  <div class="field"><label for="portfolio-tw-weight">台股目標權重</label><input id="portfolio-tw-weight" name="portfolio-tw-weight" type="number" value="40" min="0" max="100" autocomplete="off"></div>
+                  <div class="field"><label for="portfolio-us">美股策略</label><select id="portfolio-us" name="portfolio-us" autocomplete="off"></select></div>
+                  <div class="field"><label for="portfolio-us-weight">美股目標權重</label><input id="portfolio-us-weight" name="portfolio-us-weight" type="number" value="60" min="0" max="100" autocomplete="off"></div>
+                  <div class="field"><label for="portfolio-rebalance">跨組再平衡</label><select id="portfolio-rebalance" name="portfolio-rebalance" autocomplete="off"><option value="annual">每年</option><option value="quarterly">每季</option><option value="monthly">每月</option><option value="drift">偏離門檻</option><option value="none">不再平衡</option></select></div>
+                  <div class="field"><label for="portfolio-drift">偏離門檻（百分點）</label><input id="portfolio-drift" name="portfolio-drift" type="number" value="10" min="1" max="50" autocomplete="off"></div>
                   <button class="button primary" id="run-portfolio">建立組合回測</button>
                 </section>
                 <section class="panel card-body" id="portfolio-result"><div class="empty">先在兩個交易對各儲存至少一個方案，再建立跨組組合。</div></section>
