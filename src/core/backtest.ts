@@ -100,6 +100,11 @@ const rebalance = (
   const sellValue =
     Math.max(0, leveragedBefore - targetLeveragedBeforeCost) +
     Math.max(0, prototypeBefore - targetPrototypeBeforeCost);
+  const tradedValue = buyValue + sellValue;
+  if (tradedValue <= TRADE_TOLERANCE) {
+    return { tradedValue: 0, cost: 0 };
+  }
+
   const cost = Math.min(capital, feeForTrade(buyValue, sellValue, strategy));
   const afterCost = Math.max(0, capital - cost);
   const targetLeveraged = afterCost * (targetLeveragedWeight / 100);
@@ -107,7 +112,7 @@ const rebalance = (
   position.prototypeShares = targetPrototype / prototypeOpen;
   position.leveragedShares = targetLeveraged / leveragedOpen;
   position.cash -= useCash;
-  return { tradedValue: buyValue + sellValue, cost };
+  return { tradedValue, cost };
 };
 
 const historyState = (

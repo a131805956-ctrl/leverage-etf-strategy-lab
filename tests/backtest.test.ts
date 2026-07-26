@@ -317,6 +317,44 @@ describe('runBacktest', () => {
     expect(result.metrics.totalCosts).toBe(0);
   });
 
+  it('does not mutate cash or charge a hidden fee below trade tolerance', () => {
+    const initialCapital = 1e-12;
+    const result = runBacktest(
+      input({
+        initialCapital,
+        strategy: {
+          ...profitRunStrategy({
+            baseLeveragedWeight: 60,
+            highLeveragedWeight: 60,
+            drawdownRules: [],
+            recoveryRules: [],
+          }),
+          costs: {
+            enabled: true,
+            commissionRate: 0,
+            sellTaxRate: 0,
+            slippageRate: 0,
+            minimumCommission: 1,
+          },
+        },
+      }),
+    );
+
+    expect(result.trades).toHaveLength(0);
+    expect(result.points[0]).toMatchObject({
+      cash: initialCapital,
+      prototypeValue: 0,
+      leveragedValue: 0,
+      value: initialCapital,
+    });
+    expect(result.metrics).toMatchObject({
+      finalValue: initialCapital,
+      tradeCount: 0,
+      turnover: 0,
+      totalCosts: 0,
+    });
+  });
+
   it('buys only enough to reach a newly raised floor', () => {
     const result = runBacktest(belowRaisedFloorInput());
     const trade = result.trades.find((item) => item.reason === 'DRAWDOWN');
