@@ -102,8 +102,8 @@ export class StrategyLabApp {
             ${PAIRS.map((pair) => `<button class="pair-tab ${pair.id === this.pairId ? 'active' : ''}" data-pair="${pair.id}"><span class="long">${pair.prototype.symbol.replace('.TW', '')} × </span>${pair.leveraged.symbol.replace('.TW', '')}</button>`).join('')}
           </div>
           <div class="top-spacer"></div>
-          <div class="data-chip"><i class="status-dot"></i><span id="data-status">載入資料中</span><span>月度快取</span></div>
-          <button class="icon-button" id="theme-toggle" title="切換深色模式">◐</button>
+          <div class="data-chip"><i class="status-dot"></i><span id="data-status" role="status" aria-live="polite">載入資料中</span><span>月度快取</span></div>
+          <button class="icon-button" id="theme-toggle" title="切換深色模式" aria-label="切換深色模式"><span aria-hidden="true">◐</span></button>
           <button class="button mobile-config" id="open-config">策略設定</button>
         </header>
         <div class="workspace">
@@ -166,7 +166,7 @@ export class StrategyLabApp {
 
             <section class="view" id="view-optimizer">
               <div class="page-head"><div><div class="eyebrow">Local optimizer / 不需 API</div><h1>多目標策略搜尋</h1><p class="subtitle">同時看報酬、回撤、Sharpe 與 Calmar，不把單一最高值當答案</p></div><button class="button dark" id="run-optimizer">執行快速窮舉</button></div>
-              <section class="panel"><div class="panel-head"><div class="panel-title">Pareto 候選策略</div><div class="subtitle" id="optimizer-status">等待執行</div></div><div class="table-wrap" id="optimizer-results"><div class="empty">搜尋會使用目前交易對與日期範圍，共 108 組參數。</div></div></section>
+              <section class="panel"><div class="panel-head"><div class="panel-title">Pareto 候選策略</div><div class="subtitle" id="optimizer-status" role="status" aria-live="polite">等待執行</div></div><div class="table-wrap" id="optimizer-results"><div class="empty">搜尋會使用目前交易對與日期範圍，共 108 組參數。</div></div></section>
             </section>
 
             <section class="view" id="view-library">
@@ -176,43 +176,43 @@ export class StrategyLabApp {
           </main>
 
           <aside class="drawer" id="strategy-drawer">
-            <div class="drawer-head"><div><div class="eyebrow">Strategy rules</div><h2>策略守則</h2></div><button class="icon-button" id="close-config">×</button></div>
+            <div class="drawer-head"><div><div class="eyebrow">Strategy rules</div><h2>策略守則</h2></div><button class="icon-button" id="close-config" aria-label="關閉策略設定"><span aria-hidden="true">×</span></button></div>
             <div class="form-section">
               <div class="two-col">
-                <div class="field"><label>開始日</label><input id="start-date" type="date"></div>
-                <div class="field"><label>結束日</label><input id="end-date" type="date"></div>
+                <div class="field"><label for="start-date">開始日</label><input id="start-date" name="start-date" type="date" autocomplete="off"></div>
+                <div class="field"><label for="end-date">結束日</label><input id="end-date" name="end-date" type="date" autocomplete="off"></div>
               </div>
-              <div class="field"><label>單次投入金額（TWD）</label><input id="capital" type="number" value="1000000" min="1000" step="10000"></div>
+              <div class="field"><label for="capital">單次投入金額（TWD）</label><input id="capital" name="capital" type="number" value="1000000" min="1000" step="10000" autocomplete="off"></div>
               <div class="two-col">
-                <div class="field"><label>初始投入槓桿比</label><input id="base-weight" type="number" value="60" min="0" max="100"><p class="field-help">只用於開始日第一筆持倉，之後不會因離開新高而退回此比例。</p></div>
-                <div class="field"><label>創新高槓桿比</label><input id="high-weight" type="number" value="70" min="0" max="100"></div>
+                <div class="field"><label for="base-weight">初始投入槓桿比</label><input id="base-weight" name="base-weight" type="number" value="60" min="0" max="100" autocomplete="off"><p class="field-help">只用於開始日第一筆持倉，之後不會因離開新高而退回此比例。</p></div>
+                <div class="field"><label for="high-weight">創新高槓桿比</label><input id="high-weight" name="high-weight" type="number" value="70" min="0" max="100" autocomplete="off"></div>
               </div>
-              <div class="field"><label>權重執行方式</label><select id="allocation-policy"><option value="minimum-floor" selected>讓利潤奔騰／最低持倉底線</option><option value="exact-target">精確目標比例</option></select></div>
+              <div class="field"><label for="allocation-policy">權重執行方式</label><select id="allocation-policy" name="allocation-policy" autocomplete="off"><option value="minimum-floor" selected>讓利潤奔騰／最低持倉底線</option><option value="exact-target">精確目標比例</option></select></div>
               <div class="mode-note" id="floor-mode-note">規則比例是規則事件發生時的最低成交要求，不會每日微調。實際槓桿權重較高時不賣出；只有強制再平衡會調回底線。</div>
             </div>
             <div class="form-section">
               <h3>下跌加碼階梯</h3>
-              ${[[10,80],[20,90],[30,100]].map(([dd,w], index) => `<div class="rule-row"><input id="dd-${index}" type="number" value="${dd}" aria-label="回撤門檻"><span class="rule-arrow">→</span><input id="ddw-${index}" type="number" value="${w}" aria-label="槓桿權重"></div>`).join('')}
+              ${[[10,80],[20,90],[30,100]].map(([dd,w], index) => `<div class="rule-row"><input id="dd-${index}" name="drawdown-threshold-${index}" type="number" value="${dd}" aria-label="回撤門檻" autocomplete="off"><span class="rule-arrow">→</span><input id="ddw-${index}" name="drawdown-weight-${index}" type="number" value="${w}" aria-label="槓桿權重" autocomplete="off"></div>`).join('')}
             </div>
             <div class="form-section">
               <h3>反彈最低槓桿底線</h3>
-              ${[[20,90],[10,80],[5,70]].map(([distance,w], index) => `<div class="rule-row"><input id="rc-${index}" type="number" value="${distance}" aria-label="距前高"><span class="rule-arrow">→</span><input id="rcw-${index}" type="number" value="${w}" aria-label="槓桿權重"></div>`).join('')}
-              <div class="field"><label>谷底反彈確認（%）</label><input id="recovery-confirm" type="number" value="5" min="0.1" max="50" step="0.5"></div>
+              ${[[20,90],[10,80],[5,70]].map(([distance,w], index) => `<div class="rule-row"><input id="rc-${index}" name="recovery-distance-${index}" type="number" value="${distance}" aria-label="距前高" autocomplete="off"><span class="rule-arrow">→</span><input id="rcw-${index}" name="recovery-weight-${index}" type="number" value="${w}" aria-label="槓桿權重" autocomplete="off"></div>`).join('')}
+              <div class="field"><label for="recovery-confirm">谷底反彈確認（%）</label><input id="recovery-confirm" name="recovery-confirm" type="number" value="5" min="0.1" max="50" step="0.5" autocomplete="off"></div>
             </div>
             <div class="form-section">
-              <div class="field"><label>強制再平衡</label><select id="rebalance"><option value="none" selected>永不</option><option value="interval-30">每 30 日曆天</option><option value="interval-180">每 180 日曆天</option><option value="interval-365">每 365 日曆天</option><option value="interval-custom">自訂日曆天</option><optgroup label="進階選項"><option value="monthly">每月</option><option value="quarterly">每季</option><option value="annual">每年</option><option value="drift">偏離門檻</option></optgroup></select></div>
-              <div class="field" id="custom-rebalance-days-field" hidden><label>自訂日曆天數</label><input id="custom-rebalance-days" type="number" value="90" min="1" step="1"></div>
-              <div class="field" id="drift-threshold-field" hidden><label>權重偏離門檻（百分點）</label><input id="drift-threshold" type="number" value="5" min="1" max="50"></div>
+              <div class="field"><label for="rebalance">強制再平衡</label><select id="rebalance" name="rebalance" autocomplete="off"><option value="none" selected>永不</option><option value="interval-30">每 30 日曆天</option><option value="interval-180">每 180 日曆天</option><option value="interval-365">每 365 日曆天</option><option value="interval-custom">自訂日曆天</option><optgroup label="進階選項"><option value="monthly">每月</option><option value="quarterly">每季</option><option value="annual">每年</option><option value="drift">偏離門檻</option></optgroup></select></div>
+              <div class="field" id="custom-rebalance-days-field" hidden><label for="custom-rebalance-days">自訂日曆天數</label><input id="custom-rebalance-days" name="custom-rebalance-days" type="number" value="90" min="1" step="1" autocomplete="off"></div>
+              <div class="field" id="drift-threshold-field" hidden><label for="drift-threshold">權重偏離門檻（百分點）</label><input id="drift-threshold" name="drift-threshold" type="number" value="5" min="1" max="50" autocomplete="off"></div>
               <div class="mode-warning" id="strategy-mode-warning" hidden>精確目標或偏離門檻會賣出高於目標的槓桿 ETF，可能增加週轉率與交易成本。</div>
-              <div class="field"><label>股息模式</label><select id="dividend-mode"><option value="total-return">總報酬（還原權息）</option><option value="price-only">純價格（不還原）</option><option value="cash">股息暫存現金</option></select></div>
+              <div class="field"><label for="dividend-mode">股息模式</label><select id="dividend-mode" name="dividend-mode" autocomplete="off"><option value="total-return">總報酬（還原權息）</option><option value="price-only">純價格（不還原）</option><option value="cash">股息暫存現金</option></select></div>
               <div class="two-col" id="dividend-cash-fields" hidden>
-                <div class="field"><label>股息投入日</label><input id="dividend-date" type="date"></div>
-                <div class="field"><label>投入標的</label><select id="dividend-target"><option value="target-allocation">當時目標比例</option><option value="prototype">原型 ETF</option><option value="leveraged">槓桿 ETF</option></select></div>
+                <div class="field"><label for="dividend-date">股息投入日</label><input id="dividend-date" name="dividend-date" type="date" autocomplete="off"></div>
+                <div class="field"><label for="dividend-target">投入標的</label><select id="dividend-target" name="dividend-target" autocomplete="off"><option value="target-allocation">當時目標比例</option><option value="prototype">原型 ETF</option><option value="leveraged">槓桿 ETF</option></select></div>
               </div>
-              <div class="switch-row"><span>啟用交易成本（國泰研究範例）</span><input class="switch" id="cost-enabled" type="checkbox"></div>
+              <label class="switch-row" for="cost-enabled"><span>啟用交易成本（國泰研究範例）</span><input class="switch" id="cost-enabled" name="cost-enabled" type="checkbox" autocomplete="off"></label>
               <div id="cost-fields" hidden>
-                <div class="two-col"><div class="field"><label>手續費率</label><input id="commission" type="number" value="0.000855" step="0.000001"></div><div class="field"><label>最低手續費</label><input id="minimum-fee" type="number" value="20"></div></div>
-                <div class="two-col"><div class="field"><label>賣出稅率</label><input id="sell-tax" type="number" value="0.001" step="0.0001"></div><div class="field"><label>滑價率</label><input id="slippage" type="number" value="0.0005" step="0.0001"></div></div>
+                <div class="two-col"><div class="field"><label for="commission">手續費率</label><input id="commission" name="commission" type="number" value="0.000855" step="0.000001" autocomplete="off"></div><div class="field"><label for="minimum-fee">最低手續費</label><input id="minimum-fee" name="minimum-fee" type="number" value="20" autocomplete="off"></div></div>
+                <div class="two-col"><div class="field"><label for="sell-tax">賣出稅率</label><input id="sell-tax" name="sell-tax" type="number" value="0.001" step="0.0001" autocomplete="off"></div><div class="field"><label for="slippage">滑價率</label><input id="slippage" name="slippage" type="number" value="0.0005" step="0.0001" autocomplete="off"></div></div>
               </div>
             </div>
             <div class="notice">估計曝險 = 100% + 槓桿 ETF 權重。訊號只用當日以前資料，並於下一交易日開盤成交。</div>
@@ -637,6 +637,8 @@ export class StrategyLabApp {
     document.querySelector('.toast')?.remove();
     const toast = document.createElement('div');
     toast.className = `toast ${danger ? 'danger' : ''}`;
+    toast.setAttribute('role', danger ? 'alert' : 'status');
+    toast.setAttribute('aria-live', danger ? 'assertive' : 'polite');
     toast.textContent = message;
     document.body.append(toast);
     window.setTimeout(() => toast.remove(), 3500);

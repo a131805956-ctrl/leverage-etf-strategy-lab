@@ -114,4 +114,19 @@ describe('validateStrategy', () => {
       } as unknown as StrategyConfig),
     ).toContain('日曆天再平衡必須是正整數');
   });
+
+  it.each([0, -1, 51, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects an unsafe drift threshold of %s',
+    (driftThreshold) => {
+      expect(
+        validateStrategy({
+          ...validStrategy,
+          rebalance: {
+            mode: 'drift',
+            driftThreshold,
+          },
+        }),
+      ).toContain('權重偏離門檻必須大於 0 且不超過 50 個百分點');
+    },
+  );
 });

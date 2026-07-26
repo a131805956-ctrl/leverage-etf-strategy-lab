@@ -114,6 +114,7 @@ td.data { font-family: var(--font-data); text-align: right; }
 .empty { padding: 28px; text-align: center; color: var(--ink-3); }
 .drawer {
   position: sticky; top: 58px; height: calc(100vh - 58px); overflow: auto;
+  overscroll-behavior: contain;
   border-left: 1px solid var(--line); background: var(--paper); padding: 17px;
 }
 .drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }

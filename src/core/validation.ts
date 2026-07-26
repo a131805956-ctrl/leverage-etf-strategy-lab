@@ -58,6 +58,13 @@ export function validateStrategy(strategy: StrategyConfig): string[] {
   ) {
     errors.push('日曆天再平衡必須是正整數');
   }
+  if (
+    !Number.isFinite(strategy.rebalance.driftThreshold) ||
+    strategy.rebalance.driftThreshold <= 0 ||
+    strategy.rebalance.driftThreshold > 50
+  ) {
+    errors.push('權重偏離門檻必須大於 0 且不超過 50 個百分點');
+  }
   if (strategy.costs.enabled) {
     const costValues = [
       strategy.costs.commissionRate,

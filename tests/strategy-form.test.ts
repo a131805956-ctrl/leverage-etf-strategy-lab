@@ -1,9 +1,24 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import {
   resolveRebalanceSelection,
   resolveStrategyFormState,
 } from '../src/ui/strategyForm';
+
+const appSource = readFileSync(
+  new URL('../src/ui/app.ts', import.meta.url),
+  'utf8',
+);
+const cssSource = readFileSync(
+  new URL('../src/styles/app.css', import.meta.url),
+  'utf8',
+);
+const drawerSource = appSource.slice(
+  appSource.indexOf('<aside class="drawer"'),
+  appSource.indexOf('</aside>'),
+);
 
 describe('resolveRebalanceSelection', () => {
   it.each([
@@ -74,5 +89,67 @@ describe('resolveStrategyFormState', () => {
     expect(resolveStrategyFormState('minimum-floor', 'drift')).toMatchObject({
       showWarning: true,
     });
+  });
+});
+
+describe('strategy drawer accessibility markup', () => {
+  it('associates every drawer label with an existing control', () => {
+    expect(
+      [...drawerSource.matchAll(/<label(?![^>]*\bfor=")[^>]*>/g)],
+    ).toEqual([]);
+
+    const labelTargets = [
+      ...drawerSource.matchAll(/<label[^>]*\bfor="([^"]+)"/g),
+    ].map((match) => match[1]);
+
+    expect(labelTargets.length).toBeGreaterThan(0);
+    for (const target of labelTargets) {
+      expect(drawerSource).toContain(`id="${target}"`);
+    }
+  });
+
+  it('gives the new strategy controls names and disables autocomplete', () => {
+    for (const id of [
+      'allocation-policy',
+      'rebalance',
+      'custom-rebalance-days',
+      'drift-threshold',
+    ]) {
+      const control = drawerSource.match(
+        new RegExp(`<(?:input|select)[^>]*id="${id}"[^>]*>`),
+      )?.[0];
+
+      expect(control).toContain(`name="${id}"`);
+      expect(control).toContain('autocomplete="off"');
+    }
+  });
+
+  it('names icon buttons and exposes live status updates', () => {
+    for (const id of ['theme-toggle', 'close-config']) {
+      const button = appSource.match(
+        new RegExp(`<button[^>]*id="${id}"[^>]*>`),
+      )?.[0];
+      expect(button).toMatch(/aria-label="[^"]+"/);
+    }
+
+    for (const id of ['data-status', 'optimizer-status']) {
+      const status = appSource.match(
+        new RegExp(`<[^>]*id="${id}"[^>]*>`),
+      )?.[0];
+      expect(status).toContain('role="status"');
+      expect(status).toContain('aria-live="polite"');
+    }
+  });
+
+  it('keeps drawer scrolling contained and toast feedback live', () => {
+    expect(cssSource).toMatch(
+      /\.drawer\s*\{[^}]*overscroll-behavior:\s*contain;/s,
+    );
+    expect(appSource).toContain(
+      "toast.setAttribute('role', danger ? 'alert' : 'status');",
+    );
+    expect(appSource).toContain(
+      "toast.setAttribute('aria-live', danger ? 'assertive' : 'polite');",
+    );
   });
 });
