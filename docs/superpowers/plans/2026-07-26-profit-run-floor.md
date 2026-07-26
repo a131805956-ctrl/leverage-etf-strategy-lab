@@ -789,7 +789,10 @@ At 1440×1000:
 3. Confirm the initial-weight help and renamed recovery section are visible.
 4. Run the default backtest.
 5. Select 180 calendar days and rerun.
-6. Confirm transaction count changes only because scheduled rebalance records were added.
+6. Explain every transaction delta by either an exact scheduled rebalance or
+   the scheduled trade's changed holdings causing a later legitimate keyed
+   floor event; confirm there are no duplicate, zero-value, or fallback-to-60%
+   trades.
 7. Save `output/playwright/profit-run-default.png`.
 8. Confirm browser console has zero errors and warnings.
 

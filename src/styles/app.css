@@ -124,7 +124,7 @@ td.data { font-family: var(--font-data); text-align: right; }
 .form-section h3 { margin-bottom: 9px; }
 .field { margin-bottom: 10px; }
 .field label { display: flex; justify-content: space-between; margin-bottom: 5px; color: var(--ink-2); font-size: 10px; }
-.field input, .field select {
+.field input, .field select, .rule-row input {
   width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 8px 9px;
   background: var(--paper-2); color: var(--ink); font-family: var(--font-data); font-size: 11px;
 }
