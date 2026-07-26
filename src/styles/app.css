@@ -127,6 +127,19 @@ td.data { font-family: var(--font-data); text-align: right; }
   width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 8px 9px;
   background: var(--paper-2); color: var(--ink); font-family: var(--font-data); font-size: 11px;
 }
+.field-help {
+  margin: 5px 0 0; color: var(--ink-3); font-size: 9px; line-height: 1.5;
+}
+.mode-note, .mode-warning {
+  margin: 3px 0 10px; padding: 9px 10px; border-radius: 0 7px 7px 0;
+  font-size: 10px; line-height: 1.6;
+}
+.mode-note {
+  border-left: 3px solid var(--teal); background: var(--teal-soft); color: var(--ink-2);
+}
+.mode-warning {
+  border-left: 3px solid var(--orange); background: var(--orange-soft); color: var(--ink);
+}
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .rule-row { display: grid; grid-template-columns: 1fr 18px 1fr; align-items: center; gap: 5px; margin-bottom: 6px; }
 .rule-arrow { text-align: center; color: var(--ink-3); }

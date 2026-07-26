@@ -27,6 +27,10 @@ import {
   type ScenarioRepository,
 } from '../storage/repository';
 import { createWorkbenchChart, type WorkbenchChart } from './chart';
+import {
+  resolveRebalanceSelection,
+  resolveStrategyFormState,
+} from './strategyForm';
 
 const money = new Intl.NumberFormat('zh-TW', {
   style: 'currency',
@@ -180,22 +184,26 @@ export class StrategyLabApp {
               </div>
               <div class="field"><label>單次投入金額（TWD）</label><input id="capital" type="number" value="1000000" min="1000" step="10000"></div>
               <div class="two-col">
-                <div class="field"><label>基礎槓桿比</label><input id="base-weight" type="number" value="60" min="0" max="100"></div>
+                <div class="field"><label>初始投入槓桿比</label><input id="base-weight" type="number" value="60" min="0" max="100"><p class="field-help">只用於開始日第一筆持倉，之後不會因離開新高而退回此比例。</p></div>
                 <div class="field"><label>創新高槓桿比</label><input id="high-weight" type="number" value="70" min="0" max="100"></div>
               </div>
+              <div class="field"><label>權重執行方式</label><select id="allocation-policy"><option value="minimum-floor" selected>讓利潤奔騰／最低持倉底線</option><option value="exact-target">精確目標比例</option></select></div>
+              <div class="mode-note" id="floor-mode-note">規則比例是規則事件發生時的最低成交要求，不會每日微調。實際槓桿權重較高時不賣出；只有強制再平衡會調回底線。</div>
             </div>
             <div class="form-section">
               <h3>下跌加碼階梯</h3>
               ${[[10,80],[20,90],[30,100]].map(([dd,w], index) => `<div class="rule-row"><input id="dd-${index}" type="number" value="${dd}" aria-label="回撤門檻"><span class="rule-arrow">→</span><input id="ddw-${index}" type="number" value="${w}" aria-label="槓桿權重"></div>`).join('')}
             </div>
             <div class="form-section">
-              <h3>反彈減倉階梯</h3>
+              <h3>反彈最低槓桿底線</h3>
               ${[[20,90],[10,80],[5,70]].map(([distance,w], index) => `<div class="rule-row"><input id="rc-${index}" type="number" value="${distance}" aria-label="距前高"><span class="rule-arrow">→</span><input id="rcw-${index}" type="number" value="${w}" aria-label="槓桿權重"></div>`).join('')}
               <div class="field"><label>谷底反彈確認（%）</label><input id="recovery-confirm" type="number" value="5" min="0.1" max="50" step="0.5"></div>
             </div>
             <div class="form-section">
-              <div class="field"><label>組內再平衡</label><select id="rebalance"><option value="event">僅規則事件</option><option value="monthly">每月</option><option value="quarterly">每季</option><option value="annual">每年</option><option value="drift">偏離門檻</option><option value="none">事件後不持續平衡</option></select></div>
-              <div class="field"><label>權重偏離門檻</label><input id="drift-threshold" type="number" value="5" min="1" max="50"></div>
+              <div class="field"><label>強制再平衡</label><select id="rebalance"><option value="none" selected>永不</option><option value="interval-30">每 30 日曆天</option><option value="interval-180">每 180 日曆天</option><option value="interval-365">每 365 日曆天</option><option value="interval-custom">自訂日曆天</option><optgroup label="進階選項"><option value="monthly">每月</option><option value="quarterly">每季</option><option value="annual">每年</option><option value="drift">偏離門檻</option></optgroup></select></div>
+              <div class="field" id="custom-rebalance-days-field" hidden><label>自訂日曆天數</label><input id="custom-rebalance-days" type="number" value="90" min="1" step="1"></div>
+              <div class="field" id="drift-threshold-field" hidden><label>權重偏離門檻（百分點）</label><input id="drift-threshold" type="number" value="5" min="1" max="50"></div>
+              <div class="mode-warning" id="strategy-mode-warning" hidden>精確目標或偏離門檻會賣出高於目標的槓桿 ETF，可能增加週轉率與交易成本。</div>
               <div class="field"><label>股息模式</label><select id="dividend-mode"><option value="total-return">總報酬（還原權息）</option><option value="price-only">純價格（不還原）</option><option value="cash">股息暫存現金</option></select></div>
               <div class="two-col" id="dividend-cash-fields" hidden>
                 <div class="field"><label>股息投入日</label><input id="dividend-date" type="date"></div>
@@ -258,6 +266,21 @@ export class StrategyLabApp {
     this.get<HTMLSelectElement>('dividend-mode').addEventListener('change', (event) => {
       this.get('dividend-cash-fields').hidden = (event.target as HTMLSelectElement).value !== 'cash';
     });
+    const allocationPolicy = this.get<HTMLSelectElement>('allocation-policy');
+    const rebalance = this.get<HTMLSelectElement>('rebalance');
+    const updateStrategyForm = (): void => {
+      const state = resolveStrategyFormState(
+        allocationPolicy.value as StrategyConfig['allocationPolicy'],
+        rebalance.value,
+      );
+      this.get('custom-rebalance-days-field').hidden = !state.showCustomDays;
+      this.get('drift-threshold-field').hidden = !state.showDriftThreshold;
+      this.get('floor-mode-note').hidden = !state.showFloorNote;
+      this.get('strategy-mode-warning').hidden = !state.showWarning;
+    };
+    allocationPolicy.addEventListener('change', updateStrategyForm);
+    rebalance.addEventListener('change', updateStrategyForm);
+    updateStrategyForm();
     this.get<HTMLInputElement>('cost-enabled').addEventListener('change', (event) => {
       this.get('cost-fields').hidden = !(event.target as HTMLInputElement).checked;
     });
@@ -311,15 +334,18 @@ export class StrategyLabApp {
       id: `strategy-${pair.id}`,
       name: `${pair.name}回撤階梯`,
       pairId: pair.id,
+      allocationPolicy: this.get<HTMLSelectElement>('allocation-policy')
+        .value as StrategyConfig['allocationPolicy'],
       baseLeveragedWeight: number('base-weight'),
       highLeveragedWeight: number('high-weight'),
       drawdownRules: [0, 1, 2].map((index) => ({ threshold: number(`dd-${index}`), leveragedWeight: number(`ddw-${index}`) })),
       recoveryRules: [0, 1, 2].map((index) => ({ distanceToHigh: number(`rc-${index}`), leveragedWeight: number(`rcw-${index}`) })),
       recoveryConfirmationPct: number('recovery-confirm'),
-      rebalance: {
-        mode: this.get<HTMLSelectElement>('rebalance').value as StrategyConfig['rebalance']['mode'],
-        driftThreshold: number('drift-threshold'),
-      },
+      rebalance: resolveRebalanceSelection(
+        this.get<HTMLSelectElement>('rebalance').value,
+        number('custom-rebalance-days'),
+        number('drift-threshold'),
+      ),
       dividendMode: this.get<HTMLSelectElement>('dividend-mode').value as StrategyConfig['dividendMode'],
       execution: 'next-open',
       costs: {
@@ -528,6 +554,24 @@ export class StrategyLabApp {
       try {
         const pair = pairById(this.pairId);
         const baseStrategy = this.strategy(pair);
+        const allocationPolicyLabel =
+          baseStrategy.allocationPolicy === 'minimum-floor'
+            ? '最低持倉底線'
+            : '精確目標比例';
+        const rebalanceLabels: Record<
+          Exclude<StrategyConfig['rebalance']['mode'], 'calendar-interval'>,
+          string
+        > = {
+          none: '永不',
+          monthly: '每月',
+          quarterly: '每季',
+          annual: '每年',
+          drift: `偏離 ${baseStrategy.rebalance.driftThreshold} 個百分點`,
+        };
+        const rebalanceLabel =
+          baseStrategy.rebalance.mode === 'calendar-interval'
+            ? `每 ${baseStrategy.rebalance.intervalDays} 日曆天`
+            : rebalanceLabels[baseStrategy.rebalance.mode];
         const grid = gridSearch(
           { base: [40, 50, 60, 70], high: [50, 60, 70], dd10: [70, 80, 90], dd20: [80, 90, 100] },
           (parameters) => {
@@ -564,11 +608,11 @@ export class StrategyLabApp {
         const flat = grid.map((candidate, index) => ({ index, cagr: candidate.metrics.cagr, maxDrawdown: candidate.metrics.maxDrawdown }));
         const front = new Set(paretoFront(flat, [{ key: 'cagr', direction: 'maximize' }, { key: 'maxDrawdown', direction: 'minimize' }]).map((item) => item.index));
         const top = [...grid].sort((a, b) => b.score - a.score).slice(0, 20);
-        this.get('optimizer-results').innerHTML = `<table><thead><tr><th>類型</th><th>基礎／新高</th><th>回撤10／20</th><th>CAGR</th><th>最大回撤</th><th>Sharpe</th><th>Calmar</th></tr></thead><tbody>${top.map((candidate) => {
+        this.get('optimizer-results').innerHTML = `<table><thead><tr><th>類型</th><th>初始／新高</th><th>回撤10／20</th><th>權重執行</th><th>強制再平衡</th><th>CAGR</th><th>最大回撤</th><th>Sharpe</th><th>Calmar</th></tr></thead><tbody>${top.map((candidate) => {
           const index = grid.indexOf(candidate);
-          return `<tr><td>${front.has(index) ? '<strong>Pareto</strong>' : '平衡分數'}</td><td class="data">${candidate.parameters.base}/${candidate.parameters.high}</td><td class="data">${candidate.parameters.dd10}/${candidate.parameters.dd20}</td><td class="data">${percent(candidate.metrics.cagr)}</td><td class="data">-${candidate.metrics.maxDrawdown.toFixed(1)}%</td><td class="data">${candidate.metrics.sharpe.toFixed(2)}</td><td class="data">${candidate.metrics.calmar.toFixed(2)}</td></tr>`;
+          return `<tr><td>${front.has(index) ? '<strong>Pareto</strong>' : '平衡分數'}</td><td class="data">${candidate.parameters.base}/${candidate.parameters.high}</td><td class="data">${candidate.parameters.dd10}/${candidate.parameters.dd20}</td><td>${allocationPolicyLabel}</td><td>${rebalanceLabel}</td><td class="data">${percent(candidate.metrics.cagr)}</td><td class="data">-${candidate.metrics.maxDrawdown.toFixed(1)}%</td><td class="data">${candidate.metrics.sharpe.toFixed(2)}</td><td class="data">${candidate.metrics.calmar.toFixed(2)}</td></tr>`;
         }).join('')}</tbody></table>`;
-        this.get('optimizer-status').textContent = `${grid.length} 組完成 · ${front.size} 組 Pareto 前緣`;
+        this.get('optimizer-status').textContent = `${grid.length} 組完成 · ${front.size} 組 Pareto 前緣 · ${allocationPolicyLabel} · ${rebalanceLabel}`;
       } catch (error) {
         this.toast(error instanceof Error ? error.message : '最佳化失敗', true);
       } finally {
