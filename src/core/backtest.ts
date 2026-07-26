@@ -136,10 +136,11 @@ const scheduleDue = (
 const historyState = (
   rows: AlignedBar[],
   input: BacktestInput,
+  startDate: IsoDate,
 ): RegimeSnapshot | undefined => {
   const totalReturn = input.strategy.dividendMode === 'total-return';
   let state: RegimeSnapshot | undefined;
-  for (const row of rows.filter((item) => item.date < input.startDate)) {
+  for (const row of rows.filter((item) => item.date < startDate)) {
     const price = effectivePrice(row.prototype, 'close', totalReturn);
     state = state
       ? advanceRegime(
@@ -164,6 +165,8 @@ export function runBacktest(input: BacktestInput): BacktestResult {
   );
   if (!selected.length) throw new Error('指定期間沒有共同交易日');
 
+  const firstRow = selected[0] as AlignedBar;
+  const effectiveStartDate = firstRow.date;
   const totalReturn = input.strategy.dividendMode === 'total-return';
   const prototypeDividends = new Map(
     input.prototype.dividends.map((event) => [event.date, event.amountPerShare]),
@@ -175,7 +178,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     (input.dividendReinvestments ?? []).map((item) => [item.date, item.target]),
   );
 
-  let regime = historyState(aligned, input);
+  let regime = historyState(aligned, input, effectiveStartDate);
   const initialWeight = regime
     ? (resolveAllocationRule(input.strategy, regime)?.leveragedWeight ??
       input.strategy.baseLeveragedWeight)
@@ -195,7 +198,6 @@ export function runBacktest(input: BacktestInput): BacktestResult {
   const trades: TradeRecord[] = [];
   let runningPeak = input.initialCapital;
 
-  const firstRow = selected[0] as AlignedBar;
   const firstPrototypeOpen = effectivePrice(
     firstRow.prototype,
     'open',
@@ -362,7 +364,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     id: `${input.strategy.id}-${input.startDate}-${input.endDate}`,
     pairId: input.pair.id,
     strategy: input.strategy,
-    startDate: (selected[0] as AlignedBar).date,
+    startDate: effectiveStartDate,
     endDate: (selected.at(-1) as AlignedBar).date,
     initialCapital: input.initialCapital,
     points,

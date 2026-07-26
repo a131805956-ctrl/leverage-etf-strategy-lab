@@ -70,6 +70,14 @@ describe('market regime', () => {
 });
 
 describe('allocation rules', () => {
+  it('emits a stable key at a new high', () => {
+    expect(resolveAllocationRule(strategy, initialRegime(100, date(1)))).toEqual({
+      ruleKey: 'new-high',
+      leveragedWeight: 70,
+      reason: 'NEW_HIGH',
+    });
+  });
+
   it('does not fall back to the initial weight below the first drawdown step', () => {
     const state = advanceRegime(initialRegime(100, date(1)), 95, date(2), 5);
     expect(resolveAllocationRule(strategy, state)).toBeUndefined();
@@ -93,5 +101,24 @@ describe('allocation rules', () => {
       leveragedWeight: 85,
       reason: 'RECOVERY',
     });
+  });
+
+  it('returns undefined when no recovery rule applies', () => {
+    const decline = advanceRegime(initialRegime(100, date(1)), 75, date(2), 5);
+    const recovery = advanceRegime(decline, 78.75, date(3), 5);
+    expect(recovery.regime).toBe('RECOVERY');
+    expect(resolveAllocationRule(strategy, recovery)).toBeUndefined();
+  });
+
+  it('does not mutate configured rule arrays while resolving events', () => {
+    const before = structuredClone(strategy);
+    const decline = advanceRegime(initialRegime(100, date(1)), 80, date(2), 5);
+    const recovery = advanceRegime(decline, 84, date(3), 5);
+
+    resolveAllocationRule(strategy, decline);
+    resolveAllocationRule(strategy, recovery);
+
+    expect(strategy.drawdownRules).toEqual(before.drawdownRules);
+    expect(strategy.recoveryRules).toEqual(before.recoveryRules);
   });
 });

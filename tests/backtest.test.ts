@@ -104,6 +104,23 @@ describe('runBacktest', () => {
     expect(result.trades[0]?.reason).toBe('INITIAL');
   });
 
+  it('anchors a non-common requested date to the first common trading date', () => {
+    const result = runBacktest(
+      input({
+        leveraged: {
+          ...leveraged,
+          bars: leveraged.bars.filter((item) => item.date !== '2024-01-02'),
+        },
+        startDate: '2024-01-02',
+        endDate: '2024-01-04',
+      }),
+    );
+
+    expect(result.startDate).toBe('2024-01-03');
+    expect(result.points[0]?.date).toBe('2024-01-03');
+    expect(result.trades[0]?.date).toBe('2024-01-03');
+  });
+
   it('holds cash dividends until an explicit reinvestment date', () => {
     const withDividend: MarketSeries = {
       ...prototype,
