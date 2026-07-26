@@ -1,6 +1,7 @@
 import { fingerprint } from './fingerprint';
 import { calculateMetrics, findDrawdownEpisodes } from './metrics';
 import { advanceRegime, initialRegime } from './regime';
+import { scheduledRebalanceDue } from './rebalance';
 import { resolveAllocationRule } from './rules';
 import { normalizeStrategyConfig } from './strategyConfig';
 import type {
@@ -103,34 +104,6 @@ const rebalance = (
   position.leveragedShares = targetLeveraged / leveragedOpen;
   position.cash -= useCash;
   return { tradedValue: buyValue + sellValue, cost };
-};
-
-const scheduleDue = (
-  mode: BacktestInput['strategy']['rebalance']['mode'],
-  current: IsoDate,
-  next: IsoDate,
-): boolean => {
-  if (mode === 'daily') return true;
-  const a = new Date(`${current}T00:00:00Z`);
-  const b = new Date(`${next}T00:00:00Z`);
-  if (mode === 'weekly') {
-    const week = (date: Date): number =>
-      Math.floor(
-        (Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) -
-          Date.UTC(date.getUTCFullYear(), 0, 1)) /
-          604_800_000,
-      );
-    return a.getUTCFullYear() !== b.getUTCFullYear() || week(a) !== week(b);
-  }
-  if (mode === 'monthly') return a.getUTCMonth() !== b.getUTCMonth();
-  if (mode === 'quarterly') {
-    return (
-      a.getUTCFullYear() !== b.getUTCFullYear() ||
-      Math.floor(a.getUTCMonth() / 3) !== Math.floor(b.getUTCMonth() / 3)
-    );
-  }
-  if (mode === 'annual') return a.getUTCFullYear() !== b.getUTCFullYear();
-  return false;
 };
 
 const historyState = (
@@ -333,8 +306,16 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       return;
     }
 
-    const mode = input.strategy.rebalance.mode;
-    if (scheduleDue(mode, row.date, next.date)) {
+    const rebalanceConfig = input.strategy.rebalance;
+    const mode = rebalanceConfig.mode;
+    if (
+      scheduledRebalanceDue(
+        rebalanceConfig,
+        effectiveStartDate,
+        row.date,
+        next.date,
+      )
+    ) {
       pending = {
         targetLeveragedWeight: currentTarget,
         reason: 'SCHEDULED_REBALANCE',

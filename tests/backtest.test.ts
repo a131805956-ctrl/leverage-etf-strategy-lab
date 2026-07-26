@@ -121,6 +121,46 @@ describe('runBacktest', () => {
     expect(result.trades[0]?.date).toBe('2024-01-03');
   });
 
+  it('anchors calendar intervals to the first common trading date', () => {
+    const dates = ['2024-01-01', '2024-01-03', '2024-01-30', '2024-01-31', '2024-02-05'] as const;
+    const calendarPrototype: MarketSeries = {
+      symbol: 'BASE',
+      bars: dates.map((date) => bar(date, 100, 100)),
+      dividends: [],
+    };
+    const calendarLeveraged: MarketSeries = {
+      symbol: 'LEV',
+      bars: dates
+        .filter((date) => date !== '2024-01-01')
+        .map((date) => bar(date, 100, 100)),
+      dividends: [],
+    };
+
+    const result = runBacktest(
+      input({
+        prototype: calendarPrototype,
+        leveraged: calendarLeveraged,
+        startDate: '2024-01-01',
+        endDate: '2024-02-05',
+        strategy: {
+          ...strategy,
+          drawdownRules: [],
+          recoveryRules: [],
+          rebalance: {
+            mode: 'calendar-interval',
+            intervalDays: 30,
+            driftThreshold: 5,
+          },
+        },
+      }),
+    );
+
+    expect(result.startDate).toBe('2024-01-03');
+    expect(
+      result.trades.find((trade) => trade.reason === 'SCHEDULED_REBALANCE')?.date,
+    ).toBe('2024-02-05');
+  });
+
   it('holds cash dividends until an explicit reinvestment date', () => {
     const withDividend: MarketSeries = {
       ...prototype,
