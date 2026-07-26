@@ -241,6 +241,8 @@ export function runBacktest(input: BacktestInput): BacktestResult {
 
     const reinvestTarget = reinvestments.get(row.date);
     if (reinvestTarget && position.cash > 0) {
+      const prototypeBefore = position.prototypeShares * prototypeOpen;
+      const leveragedBefore = position.leveragedShares * leveragedOpen;
       const cashBefore = position.cash;
       let leveragedWeight = currentRuleFloor;
       if (reinvestTarget === 'prototype') leveragedWeight = 0;
@@ -253,17 +255,19 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         strategy,
         position.cash,
       );
-      trades.push({
-        date: row.date,
-        reason: 'DIVIDEND_REINVEST',
-        prototypeValueBefore: position.prototypeShares * prototypeOpen,
-        leveragedValueBefore: position.leveragedShares * leveragedOpen,
-        cashBefore,
-        targetLeveragedWeight: leveragedWeight,
-        tradedValue: execution.tradedValue,
-        cost: execution.cost,
-        note: `待投入股息投入 ${reinvestTarget}`,
-      });
+      if (execution.tradedValue > TRADE_TOLERANCE) {
+        trades.push({
+          date: row.date,
+          reason: 'DIVIDEND_REINVEST',
+          prototypeValueBefore: prototypeBefore,
+          leveragedValueBefore: leveragedBefore,
+          cashBefore,
+          targetLeveragedWeight: leveragedWeight,
+          tradedValue: execution.tradedValue,
+          cost: execution.cost,
+          note: `待投入股息投入 ${reinvestTarget}`,
+        });
+      }
     }
 
     if (strategy.dividendMode === 'cash') {

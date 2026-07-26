@@ -605,7 +605,74 @@ describe('runBacktest', () => {
     );
     expect(result.points.find((point) => point.date === '2024-01-02')?.cash).toBeGreaterThan(0);
     expect(result.points.find((point) => point.date === '2024-01-03')?.cash).toBeCloseTo(0);
-    expect(result.trades.some((trade) => trade.reason === 'DIVIDEND_REINVEST')).toBe(true);
+    const reinvestment = result.trades.find(
+      (trade) => trade.reason === 'DIVIDEND_REINVEST',
+    );
+    expect(reinvestment).toMatchObject({
+      prototypeValueBefore: 800,
+      leveragedValueBefore: 0,
+      cashBefore: 100,
+    });
+  });
+
+  it('does not record or mutate a sub-tolerance dividend reinvestment', () => {
+    const dates: IsoDate[] = ['2024-01-01', '2024-01-02', '2024-01-03'];
+    const tinyDividendPrototype: MarketSeries = {
+      ...seriesForDates('BASE', dates),
+      dividends: [{ date: '2024-01-02', amountPerShare: 1e-12 }],
+    };
+    const tinyDividendStrategy: StrategyConfig = {
+      ...profitRunStrategy({
+        baseLeveragedWeight: 0,
+        highLeveragedWeight: 0,
+        drawdownRules: [],
+        recoveryRules: [],
+        dividendMode: 'cash',
+      }),
+      costs: {
+        enabled: true,
+        commissionRate: 0,
+        sellTaxRate: 0,
+        slippageRate: 0,
+        minimumCommission: 1,
+      },
+    };
+    const shared = {
+      prototype: tinyDividendPrototype,
+      leveraged: seriesForDates('LEV', dates),
+      strategy: tinyDividendStrategy,
+      endDate: '2024-01-03' as IsoDate,
+    };
+    const baseline = runBacktest(input(shared));
+    const withReinvestment = runBacktest(
+      input({
+        ...shared,
+        dividendReinvestments: [
+          { date: '2024-01-03', target: 'prototype' },
+        ],
+      }),
+    );
+
+    expect(
+      withReinvestment.trades.filter(
+        (trade) => trade.reason === 'DIVIDEND_REINVEST',
+      ),
+    ).toHaveLength(0);
+    expect(
+      withReinvestment.trades.every((trade) => trade.tradedValue > 0),
+    ).toBe(true);
+    expect(withReinvestment.metrics).toMatchObject({
+      tradeCount: baseline.metrics.tradeCount,
+      turnover: baseline.metrics.turnover,
+      totalCosts: baseline.metrics.totalCosts,
+      finalValue: baseline.metrics.finalValue,
+    });
+    expect(withReinvestment.points.at(-1)).toMatchObject({
+      cash: baseline.points.at(-1)?.cash,
+      prototypeValue: baseline.points.at(-1)?.prototypeValue,
+      leveragedValue: baseline.points.at(-1)?.leveragedValue,
+      value: baseline.points.at(-1)?.value,
+    });
   });
 
   it('keeps non-dividend capital fully invested', () => {
