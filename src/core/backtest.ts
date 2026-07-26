@@ -1,7 +1,7 @@
 import { fingerprint } from './fingerprint';
 import { calculateMetrics, findDrawdownEpisodes } from './metrics';
 import { advanceRegime, initialRegime } from './regime';
-import { resolveTargetAllocation } from './rules';
+import { resolveAllocationRule } from './rules';
 import { normalizeStrategyConfig } from './strategyConfig';
 import type {
   BacktestInput,
@@ -177,7 +177,8 @@ export function runBacktest(input: BacktestInput): BacktestResult {
 
   let regime = historyState(aligned, input);
   const initialWeight = regime
-    ? resolveTargetAllocation(input.strategy, regime).leveragedWeight
+    ? (resolveAllocationRule(input.strategy, regime)?.leveragedWeight ??
+      input.strategy.baseLeveragedWeight)
     : input.strategy.baseLeveragedWeight;
   let currentTarget = initialWeight;
   let pending: PendingTrade | undefined = {
@@ -314,11 +315,14 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         input.initialCapital * (leveragedClose / firstLeveragedOpen),
     });
 
-    const decision = resolveTargetAllocation(input.strategy, regime);
+    const decision = resolveAllocationRule(input.strategy, regime);
     const next = selected[index + 1];
     if (!next) return;
 
-    if (Math.abs(decision.leveragedWeight - currentTarget) > 1e-9) {
+    if (
+      decision &&
+      Math.abs(decision.leveragedWeight - currentTarget) > 1e-9
+    ) {
       pending = {
         targetLeveragedWeight: decision.leveragedWeight,
         reason: decision.reason,
