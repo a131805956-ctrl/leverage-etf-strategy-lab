@@ -216,12 +216,18 @@ const cashAboveFloorInput = (
 const belowRaisedFloorInput = (): BacktestInput =>
   raisedFloorInput('minimum-floor', 50, 90);
 
-const recoveryFloorInput = (): BacktestInput =>
+const recoveryFloorInput = (
+  rebalance: StrategyConfig['rebalance'] = {
+    mode: 'none',
+    driftThreshold: 5,
+  },
+): BacktestInput =>
   input({
     strategy: profitRunStrategy({
       baseLeveragedWeight: 80,
       highLeveragedWeight: 80,
       drawdownRules: [{ threshold: 10, leveragedWeight: 90 }],
+      rebalance,
     }),
     prototype: pathSeries('BASE', [
       ['2024-01-01', 100, 100],
@@ -435,6 +441,25 @@ describe('runBacktest', () => {
     expect(
       result.trades.some((trade) => trade.reason === 'RECOVERY'),
     ).toBe(false);
+  });
+
+  it('executes drift at the next open when a lower rule floor changes', () => {
+    const result = runBacktest(
+      recoveryFloorInput({ mode: 'drift', driftThreshold: 10 }),
+    );
+    const nextOpenTrades = result.trades.filter(
+      (trade) => trade.date === '2024-01-04',
+    );
+
+    expect(nextOpenTrades).toHaveLength(1);
+    expect(nextOpenTrades[0]).toMatchObject({
+      reason: 'DRIFT_REBALANCE',
+      targetLeveragedWeight: 70,
+    });
+    expect(
+      result.points.find((point) => point.date === '2024-01-04')
+        ?.leveragedWeight,
+    ).toBeCloseTo(70);
   });
 
   it('does not micro-rebalance after weight drifts below an unchanged floor', () => {

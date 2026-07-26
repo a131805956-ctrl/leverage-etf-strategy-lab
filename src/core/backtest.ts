@@ -406,13 +406,6 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         note: `${mode} 定期再平衡`,
         policy: 'exact-target',
       };
-    } else if (decision && ruleChanged) {
-      pending = {
-        targetLeveragedWeight: decision.leveragedWeight,
-        reason: decision.reason,
-        note: `${regime.regime}：距前高 ${regime.distanceToHighPct.toFixed(2)}%`,
-        policy: strategy.allocationPolicy,
-      };
     } else if (
       mode === 'drift' &&
       Math.abs(leveragedWeight - currentRuleFloor) >=
@@ -423,6 +416,13 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         reason: 'DRIFT_REBALANCE',
         note: `實際權重偏離 ${Math.abs(leveragedWeight - currentRuleFloor).toFixed(2)} 個百分點`,
         policy: 'exact-target',
+      };
+    } else if (decision && ruleChanged) {
+      pending = {
+        targetLeveragedWeight: decision.leveragedWeight,
+        reason: decision.reason,
+        note: `${regime.regime}：距前高 ${regime.distanceToHighPct.toFixed(2)}%`,
+        policy: strategy.allocationPolicy,
       };
     }
   });
