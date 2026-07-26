@@ -1,4 +1,5 @@
 import type { SavedScenario } from '../core/types';
+import { migrateSavedScenario } from './migrateScenario';
 import type { ScenarioRepository } from './repository';
 
 const DATABASE = 'leverage-etf-strategy-lab';
@@ -34,7 +35,9 @@ export class IndexedDbScenarioRepository implements ScenarioRepository {
       .objectStore(STORE)
       .getAll() as IDBRequest<SavedScenario[]>;
     const scenarios = await requestAsPromise<SavedScenario[]>(request);
-    return scenarios.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return scenarios
+      .map(migrateSavedScenario)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   async save(scenario: SavedScenario): Promise<void> {
@@ -63,6 +66,9 @@ export class IndexedDbScenarioRepository implements ScenarioRepository {
       .transaction(STORE)
       .objectStore(STORE)
       .get(id) as IDBRequest<SavedScenario | undefined>;
-    return requestAsPromise<SavedScenario | undefined>(request);
+    const scenario = await requestAsPromise<SavedScenario | undefined>(
+      request,
+    );
+    return scenario ? migrateSavedScenario(scenario) : undefined;
   }
 }

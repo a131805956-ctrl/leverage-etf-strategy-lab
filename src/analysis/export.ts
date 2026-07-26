@@ -54,6 +54,11 @@ export function createAnalysisBundle(
 
 export function createChatGptPrompt(result: AnyResult): string {
   const metrics = JSON.stringify(result.metrics, null, 2);
+  const configuration = JSON.stringify(
+    'strategy' in result ? result.strategy : result.config,
+    null,
+    2,
+  );
   return [
     '你是嚴謹的量化研究助理。請分析我附上的槓桿 ETF 回測資料。',
     '',
@@ -65,6 +70,8 @@ export function createChatGptPrompt(result: AnyResult): string {
     '',
     '不得把樣本內最佳結果視為未來保證，也不得省略最差區間。',
     `結果指紋：${result.fingerprint}`,
+    '目前執行設定：',
+    configuration,
     '主要指標：',
     metrics,
   ].join('\n');
@@ -72,9 +79,21 @@ export function createChatGptPrompt(result: AnyResult): string {
 
 export function resultToCsv(result: AnyResult): string {
   const header = 'date,value,drawdown';
+  const metadata =
+    'strategy' in result
+      ? [
+          `# allocationPolicy,${result.strategy.allocationPolicy}`,
+          `# rebalanceMode,${result.strategy.rebalance.mode}`,
+          `# rebalanceIntervalDays,${result.strategy.rebalance.intervalDays ?? ''}`,
+        ]
+      : [
+          '# allocationPolicy,',
+          `# rebalanceMode,${result.config.rebalance.mode}`,
+          '# rebalanceIntervalDays,',
+        ];
   const rows = result.points.map(
     (point) =>
       `${point.date},${point.value.toFixed(4)},${point.drawdown.toFixed(4)}`,
   );
-  return [header, ...rows].join('\n');
+  return [...metadata, header, ...rows].join('\n');
 }

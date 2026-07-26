@@ -1,7 +1,41 @@
 import { describe, expect, it } from 'vitest';
 
-import { gridSearch } from '../src/optimization/gridSearch';
+import {
+  createOptimizationCandidate,
+  gridSearch,
+} from '../src/optimization/gridSearch';
 import { paretoFront } from '../src/optimization/pareto';
+import type { StrategyConfig } from '../src/core/types';
+
+const activeStrategy = {
+  id: 'active',
+  name: 'Active strategy',
+  pairId: 'tw50',
+  allocationPolicy: 'minimum-floor',
+  baseLeveragedWeight: 60,
+  highLeveragedWeight: 70,
+  drawdownRules: [
+    { threshold: 10, leveragedWeight: 80 },
+    { threshold: 20, leveragedWeight: 90 },
+    { threshold: 30, leveragedWeight: 100 },
+  ],
+  recoveryRules: [],
+  recoveryConfirmationPct: 3,
+  rebalance: {
+    mode: 'calendar-interval',
+    intervalDays: 180,
+    driftThreshold: 5,
+  },
+  dividendMode: 'total-return',
+  execution: 'next-open',
+  costs: {
+    enabled: false,
+    commissionRate: 0,
+    sellTaxRate: 0,
+    slippageRate: 0,
+    minimumCommission: 0,
+  },
+} satisfies StrategyConfig;
 
 describe('gridSearch', () => {
   it('evaluates every parameter combination in deterministic order', () => {
@@ -24,6 +58,27 @@ describe('gridSearch', () => {
     expect(results).toHaveLength(6);
     expect(results[0]?.parameters).toEqual({ base: 40, step: 10 });
     expect(results.at(-1)?.parameters).toEqual({ base: 60, step: 30 });
+  });
+
+  it('inherits policy and rebalance instead of optimizing them as axes', () => {
+    const candidate = createOptimizationCandidate(activeStrategy, {
+      base: 50,
+      high: 60,
+      dd10: 70,
+      dd20: 80,
+    });
+
+    expect(candidate.allocationPolicy).toBe('minimum-floor');
+    expect(candidate.rebalance).toEqual(activeStrategy.rebalance);
+    expect(candidate).toMatchObject({
+      baseLeveragedWeight: 50,
+      highLeveragedWeight: 60,
+      drawdownRules: [
+        { threshold: 10, leveragedWeight: 70 },
+        { threshold: 20, leveragedWeight: 80 },
+        { threshold: 30, leveragedWeight: 100 },
+      ],
+    });
   });
 });
 

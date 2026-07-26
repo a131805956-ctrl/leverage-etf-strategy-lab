@@ -1,4 +1,5 @@
 import type { SavedScenario } from '../core/types';
+import { migrateSavedScenario } from './migrateScenario';
 
 export interface PortableScenarioFile {
   schemaVersion: 1;
@@ -19,9 +20,16 @@ const isScenario = (value: unknown): value is SavedScenario => {
   return (
     typeof scenario.id === 'string' &&
     typeof scenario.name === 'string' &&
+    typeof scenario.createdAt === 'string' &&
+    typeof scenario.updatedAt === 'string' &&
     (scenario.kind === 'pair' || scenario.kind === 'portfolio') &&
     Array.isArray(scenario.tags) &&
-    Boolean(scenario.result)
+    Boolean(
+      scenario.result &&
+        typeof scenario.result === 'object' &&
+        'fingerprint' in scenario.result &&
+        typeof scenario.result.fingerprint === 'string',
+    )
   );
 };
 
@@ -43,9 +51,9 @@ export class MemoryScenarioRepository implements ScenarioRepository {
 
   async list(): Promise<SavedScenario[]> {
     return Promise.resolve(
-      [...this.scenarios.values()].sort((a, b) =>
-        b.updatedAt.localeCompare(a.updatedAt),
-      ),
+      [...this.scenarios.values()]
+        .map(migrateSavedScenario)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     );
   }
 
@@ -60,7 +68,10 @@ export class MemoryScenarioRepository implements ScenarioRepository {
   }
 
   async get(id: string): Promise<SavedScenario | undefined> {
-    return Promise.resolve(this.scenarios.get(id));
+    const scenario = this.scenarios.get(id);
+    return Promise.resolve(
+      scenario ? migrateSavedScenario(scenario) : undefined,
+    );
   }
 }
 

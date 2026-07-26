@@ -17,9 +17,13 @@ import {
   needsRefresh,
   requiredCutoff,
 } from '../data/freshness';
-import { gridSearch } from '../optimization/gridSearch';
+import {
+  createOptimizationCandidate,
+  gridSearch,
+} from '../optimization/gridSearch';
 import { paretoFront } from '../optimization/pareto';
 import { IndexedDbScenarioRepository } from '../storage/indexedDbRepository';
+import { migrateSavedScenario } from '../storage/migrateScenario';
 import {
   MemoryScenarioRepository,
   createPortableFile,
@@ -575,16 +579,10 @@ export class StrategyLabApp {
         const grid = gridSearch(
           { base: [40, 50, 60, 70], high: [50, 60, 70], dd10: [70, 80, 90], dd20: [80, 90, 100] },
           (parameters) => {
-            const candidate: StrategyConfig = {
-              ...baseStrategy,
-              baseLeveragedWeight: parameters.base ?? 60,
-              highLeveragedWeight: parameters.high ?? 70,
-              drawdownRules: [
-                { threshold: 10, leveragedWeight: parameters.dd10 ?? 80 },
-                { threshold: 20, leveragedWeight: parameters.dd20 ?? 90 },
-                { threshold: 30, leveragedWeight: 100 },
-              ],
-            };
+            const candidate = createOptimizationCandidate(
+              baseStrategy,
+              parameters,
+            );
             const result = runBacktest({
               pair,
               strategy: candidate,
@@ -622,15 +620,38 @@ export class StrategyLabApp {
   }
 
   private async importLibrary(event: Event): Promise<void> {
-    const file = (event.target as HTMLInputElement).files?.[0];
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
     if (!file) return;
-    const parsed: unknown = JSON.parse(await file.text());
-    if (!isPortableScenarioFile(parsed)) throw new Error('匯入檔案格式不正確');
-    for (const scenario of parsed.scenarios) await this.repository.save(scenario);
-    this.saved = await this.repository.list();
-    this.renderLibrary();
-    this.renderPortfolioOptions();
-    this.toast(`已匯入 ${parsed.scenarios.length} 個方案`);
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!isPortableScenarioFile(parsed)) {
+        throw new Error('匯入檔案格式不正確');
+      }
+      let migratedCount = 0;
+      for (const scenario of parsed.scenarios) {
+        const migrated = migrateSavedScenario(scenario);
+        if (migrated !== scenario) migratedCount += 1;
+        await this.repository.save(migrated);
+      }
+      this.saved = await this.repository.list();
+      this.renderLibrary();
+      this.renderPortfolioOptions();
+      this.toast(
+        `已匯入 ${parsed.scenarios.length} 個方案，其中 ${migratedCount} 個已遷移`,
+      );
+    } catch (error) {
+      this.toast(
+        error instanceof SyntaxError
+          ? '匯入檔案不是有效的 JSON'
+          : error instanceof Error
+            ? error.message
+            : '匯入檔案失敗',
+        true,
+      );
+    } finally {
+      input.value = '';
+    }
   }
 
   private toast(message: string, danger = false): void {

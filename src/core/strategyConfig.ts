@@ -1,7 +1,6 @@
 import type {
   LegacyStrategyConfig,
   StrategyConfig,
-  StrategyRebalanceMode,
 } from './types';
 
 const normalizeRebalance = (
@@ -27,7 +26,7 @@ const normalizeRebalance = (
 
   return {
     ...rebalance,
-    mode: rebalance.mode as StrategyRebalanceMode,
+    mode: rebalance.mode,
   };
 };
 
