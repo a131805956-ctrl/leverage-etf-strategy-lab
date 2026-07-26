@@ -208,6 +208,9 @@
 ## 10. 儲存與重現
 
 - 第一版使用 IndexedDB。
+- `SavedScenario` 採單一結果模型：每筆方案依 `kind` 保存一個 `result`，`pair` 對應一個 `BacktestResult`，`portfolio` 對應一個 `PortfolioResult`。
+- 多個交易對策略不嵌在同一方案的 `pairResults[]`；它們是 `PortableScenarioFile.scenarios[]` 中多筆獨立的 `SavedScenario`，組合結果再以配置中的 `backtestId` 引用各子策略。
+- 舊版 pair 方案載入時只正規化可執行的 `BacktestResult.strategy`。既有 points、trades、drawdowns、metrics 與 fingerprint 視為歷史輸出，不重算、不改寫。
 - 支援策略、回測快照、最佳化結果與多組組合。
 - 支援命名、標籤、複製、封存、比較、JSON 匯入匯出。
 - 每個結果保存：

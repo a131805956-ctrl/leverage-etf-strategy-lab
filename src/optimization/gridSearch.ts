@@ -24,6 +24,9 @@ export function createOptimizationCandidate(
 ): StrategyConfig {
   return {
     ...activeStrategy,
+    rebalance: { ...activeStrategy.rebalance },
+    costs: { ...activeStrategy.costs },
+    recoveryRules: activeStrategy.recoveryRules.map((rule) => ({ ...rule })),
     baseLeveragedWeight: parameters.base ?? 60,
     highLeveragedWeight: parameters.high ?? 70,
     drawdownRules: [

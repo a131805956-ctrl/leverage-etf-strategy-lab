@@ -78,22 +78,35 @@ export function createChatGptPrompt(result: AnyResult): string {
 }
 
 export function resultToCsv(result: AnyResult): string {
-  const header = 'date,value,drawdown';
-  const metadata =
+  const encodeCell = (value: string | number): string => {
+    const text = String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  };
+  const header = [
+    'date',
+    'value',
+    'drawdown',
+    'allocationPolicy',
+    'rebalanceMode',
+    'rebalanceIntervalDays',
+  ];
+  const configuration =
     'strategy' in result
       ? [
-          `# allocationPolicy,${result.strategy.allocationPolicy}`,
-          `# rebalanceMode,${result.strategy.rebalance.mode}`,
-          `# rebalanceIntervalDays,${result.strategy.rebalance.intervalDays ?? ''}`,
+          result.strategy.allocationPolicy,
+          result.strategy.rebalance.mode,
+          result.strategy.rebalance.intervalDays ?? '',
         ]
-      : [
-          '# allocationPolicy,',
-          `# rebalanceMode,${result.config.rebalance.mode}`,
-          '# rebalanceIntervalDays,',
-        ];
+      : ['', result.config.rebalance.mode, ''];
   const rows = result.points.map(
-    (point) =>
-      `${point.date},${point.value.toFixed(4)},${point.drawdown.toFixed(4)}`,
+    (point) => [
+      point.date,
+      point.value.toFixed(4),
+      point.drawdown.toFixed(4),
+      ...configuration,
+    ],
   );
-  return [...metadata, header, ...rows].join('\n');
+  return [header, ...rows]
+    .map((row) => row.map(encodeCell).join(','))
+    .join('\n');
 }

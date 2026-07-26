@@ -666,6 +666,7 @@ git commit -m "feat: make profit-run floors the default UI"
 - Modify: `src/storage/repository.ts`
 - Modify: `src/storage/indexedDbRepository.ts`
 - Modify: `src/analysis/export.ts`
+- Modify: `src/optimization/gridSearch.ts`
 - Modify: `src/ui/app.ts`
 - Modify: `tests/storage.test.ts`
 - Modify: `tests/analysis-export.test.ts`
@@ -676,6 +677,8 @@ git commit -m "feat: make profit-run floors the default UI"
 - Consumes: `normalizeStrategyConfig`.
 - Keeps existing saved `BacktestResult` values and fingerprints unchanged.
 - Produces one centralized saved-scenario migration used by both portable-file imports and IndexedDB list/get paths.
+- Uses the approved persisted model: each `SavedScenario` has exactly one discriminated `result`; multiple saved pair strategies are multiple entries in `PortableScenarioFile.scenarios[]`.
+- For a pair scenario, the executable configuration is `scenario.result.strategy`. There is no `pairResults[]` container.
 
 - [ ] **Step 1: Write failing compatibility tests**
 
@@ -692,15 +695,23 @@ it('exports the allocation policy and interval days', () => {
   });
 });
 
-it('migrates legacy IndexedDB and portable scenarios through one boundary', async () => {
-  const migrated = migrateSavedScenario(legacySavedScenario);
-  expect(migrated.pairResults[0].input.strategy).toMatchObject({
+it('migrates multiple legacy pair scenarios without changing outputs', () => {
+  const migrated = legacyPortableFile.scenarios.map(migrateSavedScenario);
+  expect(migrated[0].result.strategy).toMatchObject({
     allocationPolicy: 'exact-target',
     rebalance: { mode: 'none' },
   });
-  expect(migrated.pairResults[0].result).toEqual(
-    legacySavedScenario.pairResults[0].result,
-  );
+  expect(migrated[1].result.strategy.rebalance).toMatchObject({
+    mode: 'calendar-interval',
+    intervalDays: 7,
+  });
+  migrated.forEach((scenario, index) => {
+    const source = legacyPortableFile.scenarios[index].result;
+    expect(scenario.result.points).toBe(source.points);
+    expect(scenario.result.trades).toBe(source.trades);
+    expect(scenario.result.metrics).toBe(source.metrics);
+    expect(scenario.result.fingerprint).toBe(source.fingerprint);
+  });
 });
 ```
 
@@ -714,12 +725,12 @@ Expected: fixtures lack the new required strategy fields or export assertions fa
 
 - [ ] **Step 3: Preserve results and normalize only executable configs**
 
-Create `migrateSavedScenario` and route both portable-file imports and IndexedDB `list`/`get` results through it. Normalize only executable strategy configurations; do not mutate saved result points, trades, metrics, or fingerprints. Catch invalid JSON imports in the UI and report how many scenarios were migrated. Update fixtures and optimizer candidates to carry explicit policies.
+Create `migrateSavedScenario` and route both portable-file imports and IndexedDB `list`/`get` results through it. For pair scenarios, normalize only `BacktestResult.strategy`; do not recalculate or mutate saved points, trades, drawdowns, metrics, or fingerprints. Validate portable scenarios by their discriminated `kind`, including nested result entry shapes and legacy executable strategies. Catch invalid JSON imports in the UI and report how many scenarios were migrated. Update fixtures and optimizer candidates to carry explicit policies.
 
 - JSON analysis bundles already carry the full strategy; keep that behavior.
-- Add allocation policy, rebalance mode, and interval days to the CSV export metadata.
+- Add allocation policy, rebalance mode, and interval days as explicit CSV columns while keeping the first record a parseable header.
 - Include the active strategy configuration in the ChatGPT analysis prompt.
-- Keep optimizer candidates inheriting the active policy and rebalance configuration, and display both in optimizer results rather than optimizing them as extra axes.
+- Keep optimizer candidates inheriting the active policy and rebalance configuration, deep-clone inherited mutable configuration, and display policy/rebalance in optimizer results rather than optimizing them as extra axes.
 
 - [ ] **Step 4: Update the main design**
 

@@ -14,8 +14,8 @@ const requestAsPromise = <T>(request: IDBRequest<T>): Promise<T> =>
 export class IndexedDbScenarioRepository implements ScenarioRepository {
   private readonly database: Promise<IDBDatabase>;
 
-  constructor() {
-    this.database = new Promise((resolve, reject) => {
+  constructor(database?: Promise<IDBDatabase>) {
+    this.database = database ?? new Promise((resolve, reject) => {
       const request = indexedDB.open(DATABASE, 1);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains(STORE)) {

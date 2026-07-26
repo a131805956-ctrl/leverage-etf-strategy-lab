@@ -2,6 +2,7 @@ import { normalizeStrategyConfig } from '../core/strategyConfig';
 import type {
   BacktestResult,
   LegacyStrategyConfig,
+  PortfolioResult,
   SavedScenario,
   StrategyConfig,
 } from '../core/types';
@@ -10,8 +11,12 @@ type ExecutableResult = BacktestResult & {
   strategy: StrategyConfig | LegacyStrategyConfig;
 };
 
+export type MigratableSavedScenario = Omit<SavedScenario, 'result'> & {
+  result: ExecutableResult | PortfolioResult;
+};
+
 const hasExecutableStrategy = (
-  result: SavedScenario['result'],
+  result: MigratableSavedScenario['result'],
 ): result is ExecutableResult => {
   if (!('strategy' in result)) return false;
   const strategy = result.strategy as unknown;
@@ -36,9 +41,13 @@ const needsStrategyMigration = (
  * Returns a current executable view of a saved scenario without rewriting any
  * persisted result series, trades, metrics, or fingerprint.
  */
-export function migrateSavedScenario(scenario: SavedScenario): SavedScenario {
+export function migrateSavedScenario(
+  scenario: MigratableSavedScenario,
+): SavedScenario {
   if (!hasExecutableStrategy(scenario.result)) return scenario;
-  if (!needsStrategyMigration(scenario.result.strategy)) return scenario;
+  if (!needsStrategyMigration(scenario.result.strategy)) {
+    return scenario;
+  }
 
   return {
     ...scenario,

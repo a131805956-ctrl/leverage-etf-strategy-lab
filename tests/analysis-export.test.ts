@@ -5,7 +5,42 @@ import {
   createChatGptPrompt,
   resultToCsv,
 } from '../src/analysis/export';
-import type { BacktestResult } from '../src/core/types';
+import type { BacktestResult, PortfolioResult } from '../src/core/types';
+
+const parseCsv = (csv: string): string[][] => {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let index = 0; index < csv.length; index += 1) {
+    const character = csv[index];
+    if (quoted) {
+      if (character === '"' && csv[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else if (character === '"') {
+        quoted = false;
+      } else {
+        cell += character;
+      }
+    } else if (character === '"') {
+      quoted = true;
+    } else if (character === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (character === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else if (character !== '\r') {
+      cell += character;
+    }
+  }
+  row.push(cell);
+  rows.push(row);
+  return rows;
+};
 
 const result = {
   id: 'result-1',
@@ -54,11 +89,43 @@ describe('AI analysis export', () => {
     expect(prompt).toContain('"intervalDays": 180');
   });
 
-  it('exports the allocation policy and rebalance metadata to CSV', () => {
-    const csv = resultToCsv(result);
+  it('exports configuration as parseable columns with consistent row widths', () => {
+    const rows = parseCsv(resultToCsv(result));
 
-    expect(csv).toContain('# allocationPolicy,minimum-floor');
-    expect(csv).toContain('# rebalanceMode,calendar-interval');
-    expect(csv).toContain('# rebalanceIntervalDays,180');
+    expect(rows[0]).toEqual([
+      'date',
+      'value',
+      'drawdown',
+      'allocationPolicy',
+      'rebalanceMode',
+      'rebalanceIntervalDays',
+    ]);
+    expect(rows[1]).toEqual([
+      '2020-01-01',
+      '1000000.0000',
+      '0.0000',
+      'minimum-floor',
+      'calendar-interval',
+      '180',
+    ]);
+    expect(rows.every((row) => row.length === rows[0]?.length)).toBe(true);
+  });
+
+  it('leaves pair-only CSV columns blank for a portfolio result', () => {
+    const portfolio = {
+      config: { rebalance: { mode: 'annual' } },
+      points: [{ date: '2020-01-01', value: 2_000_000, drawdown: 0 }],
+    } as unknown as PortfolioResult;
+    const rows = parseCsv(resultToCsv(portfolio));
+
+    expect(rows[1]).toEqual([
+      '2020-01-01',
+      '2000000.0000',
+      '0.0000',
+      '',
+      'annual',
+      '',
+    ]);
+    expect(rows[1]?.length).toBe(rows[0]?.length);
   });
 });

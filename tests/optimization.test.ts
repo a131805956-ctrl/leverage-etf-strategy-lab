@@ -19,7 +19,7 @@ const activeStrategy = {
     { threshold: 20, leveragedWeight: 90 },
     { threshold: 30, leveragedWeight: 100 },
   ],
-  recoveryRules: [],
+  recoveryRules: [{ distanceToHigh: 5, leveragedWeight: 70 }],
   recoveryConfirmationPct: 3,
   rebalance: {
     mode: 'calendar-interval',
@@ -70,6 +70,10 @@ describe('gridSearch', () => {
 
     expect(candidate.allocationPolicy).toBe('minimum-floor');
     expect(candidate.rebalance).toEqual(activeStrategy.rebalance);
+    expect(candidate.rebalance).not.toBe(activeStrategy.rebalance);
+    expect(candidate.costs).not.toBe(activeStrategy.costs);
+    expect(candidate.recoveryRules).not.toBe(activeStrategy.recoveryRules);
+    expect(candidate.recoveryRules[0]).not.toBe(activeStrategy.recoveryRules[0]);
     expect(candidate).toMatchObject({
       baseLeveragedWeight: 50,
       highLeveragedWeight: 60,
@@ -79,6 +83,15 @@ describe('gridSearch', () => {
         { threshold: 30, leveragedWeight: 100 },
       ],
     });
+
+    candidate.rebalance.driftThreshold = 9;
+    candidate.costs.commissionRate = 0.5;
+    if (candidate.recoveryRules[0]) {
+      candidate.recoveryRules[0].leveragedWeight = 10;
+    }
+    expect(activeStrategy.rebalance.driftThreshold).toBe(5);
+    expect(activeStrategy.costs.commissionRate).toBe(0);
+    expect(activeStrategy.recoveryRules[0]?.leveragedWeight).toBe(70);
   });
 });
 
