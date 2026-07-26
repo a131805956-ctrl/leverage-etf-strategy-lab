@@ -11,7 +11,6 @@ export function validateStrategy(strategy: StrategyConfig): string[] {
 
   if (!strategy.name.trim()) errors.push('策略名稱不可空白');
   if (
-    strategy.allocationPolicy !== undefined &&
     strategy.allocationPolicy !== 'minimum-floor' &&
     strategy.allocationPolicy !== 'exact-target'
   ) {

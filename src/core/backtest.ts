@@ -2,6 +2,7 @@ import { fingerprint } from './fingerprint';
 import { calculateMetrics, findDrawdownEpisodes } from './metrics';
 import { advanceRegime, initialRegime } from './regime';
 import { resolveTargetAllocation } from './rules';
+import { normalizeStrategyConfig } from './strategyConfig';
 import type {
   BacktestInput,
   BacktestResult,
@@ -153,7 +154,7 @@ const historyState = (
 };
 
 export function runBacktest(input: BacktestInput): BacktestResult {
-  const errors = validateStrategy(input.strategy);
+  const errors = validateStrategy(normalizeStrategyConfig(input.strategy));
   if (errors.length) throw new Error(errors.join('；'));
   if (!(input.initialCapital > 0)) throw new Error('初始投入金額必須大於零');
 

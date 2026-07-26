@@ -55,4 +55,45 @@ describe('normalizeStrategyConfig', () => {
       intervalDays,
     });
   });
+
+  it.each([
+    ['event', 'none', undefined],
+    ['daily', 'calendar-interval', 1],
+    ['weekly', 'calendar-interval', 7],
+  ] as const)(
+    'preserves extra rebalance fields without mutating a %s strategy',
+    (mode, normalizedMode, intervalDays) => {
+      const input = {
+        ...legacyStrategy,
+        rebalance: {
+          mode,
+          driftThreshold: 5,
+          futureOption: { retain: true },
+        },
+      };
+      const original = structuredClone(input);
+
+      const normalized = normalizeStrategyConfig(input);
+
+      expect(normalized.rebalance).toEqual({
+        mode: normalizedMode,
+        ...(intervalDays === undefined ? {} : { intervalDays }),
+        driftThreshold: 5,
+        futureOption: { retain: true },
+      });
+      expect(input).toEqual(original);
+      expect(normalized).not.toBe(input);
+      expect(normalized.rebalance).not.toBe(input.rebalance);
+    },
+  );
+
+  it('treats an undefined allocation policy as missing', () => {
+    const normalized = normalizeStrategyConfig({
+      ...legacyStrategy,
+      allocationPolicy: undefined,
+      rebalance: { mode: 'none', driftThreshold: 5 },
+    });
+
+    expect(normalized.allocationPolicy).toBe('exact-target');
+  });
 });

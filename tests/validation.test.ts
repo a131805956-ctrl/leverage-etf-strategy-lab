@@ -56,6 +56,15 @@ describe('validateStrategy', () => {
     ).toContain('配置政策必須是最低底線或精確目標');
   });
 
+  it('requires an allocation policy', () => {
+    expect(
+      validateStrategy({
+        ...validStrategy,
+        allocationPolicy: undefined,
+      } as unknown as StrategyConfig),
+    ).toContain('配置政策必須是最低底線或精確目標');
+  });
+
   it('rejects weights outside 0 to 100', () => {
     const strategy = { ...validStrategy, baseLeveragedWeight: 101 };
     expect(validateStrategy(strategy)).toContain('基礎槓桿 ETF 權重必須介於 0% 到 100%');
