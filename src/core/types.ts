@@ -31,6 +31,14 @@ export interface PairDefinition {
 
 export type DividendMode = 'total-return' | 'price-only' | 'cash';
 export type ExecutionModel = 'next-open';
+export type AllocationPolicy = 'minimum-floor' | 'exact-target';
+export type StrategyRebalanceMode =
+  | 'none'
+  | 'calendar-interval'
+  | 'monthly'
+  | 'quarterly'
+  | 'annual'
+  | 'drift';
 export type RebalanceMode =
   | 'event'
   | 'daily'
@@ -63,18 +71,28 @@ export interface StrategyConfig {
   id: string;
   name: string;
   pairId: string;
+  allocationPolicy: AllocationPolicy;
   baseLeveragedWeight: number;
   highLeveragedWeight: number;
   drawdownRules: DrawdownRule[];
   recoveryRules: RecoveryRule[];
   recoveryConfirmationPct: number;
   rebalance: {
-    mode: RebalanceMode;
+    mode: StrategyRebalanceMode;
+    intervalDays?: number;
     driftThreshold: number;
   };
   dividendMode: DividendMode;
   execution: ExecutionModel;
   costs: CostConfig;
+}
+
+export interface LegacyStrategyConfig
+  extends Omit<StrategyConfig, 'allocationPolicy' | 'rebalance'> {
+  rebalance: {
+    mode: Exclude<RebalanceMode, 'calendar-interval'>;
+    driftThreshold: number;
+  };
 }
 
 export type MarketRegime = 'AT_HIGH' | 'DECLINE' | 'RECOVERY';
@@ -170,7 +188,7 @@ export interface BacktestResult {
 
 export interface BacktestInput {
   pair: PairDefinition;
-  strategy: StrategyConfig;
+  strategy: StrategyConfig | LegacyStrategyConfig;
   prototype: MarketSeries;
   leveraged: MarketSeries;
   startDate: IsoDate;

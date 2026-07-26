@@ -1,7 +1,9 @@
 import { fingerprint } from './fingerprint';
 import { calculateMetrics, findDrawdownEpisodes } from './metrics';
 import { advanceRegime, initialRegime } from './regime';
-import { resolveTargetAllocation } from './rules';
+import { scheduledRebalanceDue } from './rebalance';
+import { resolveAllocationRule } from './rules';
+import { normalizeStrategyConfig } from './strategyConfig';
 import type {
   BacktestInput,
   BacktestResult,
@@ -9,6 +11,7 @@ import type {
   IsoDate,
   PriceBar,
   RegimeSnapshot,
+  StrategyConfig,
   TradeReason,
   TradeRecord,
 } from './types';
@@ -30,7 +33,10 @@ interface PendingTrade {
   targetLeveragedWeight: number;
   reason: TradeReason;
   note: string;
+  policy: 'exact-target' | 'minimum-floor';
 }
+
+const TRADE_TOLERANCE = 1e-9;
 
 const effectivePrice = (
   bar: PriceBar,
@@ -59,9 +65,9 @@ const alignBars = (input: BacktestInput): AlignedBar[] => {
 const feeForTrade = (
   buyValue: number,
   sellValue: number,
-  input: BacktestInput,
+  strategy: StrategyConfig,
 ): number => {
-  const costs = input.strategy.costs;
+  const costs = strategy.costs;
   if (!costs.enabled) return 0;
   const gross = buyValue + sellValue;
   const commission =
@@ -80,7 +86,7 @@ const rebalance = (
   prototypeOpen: number,
   leveragedOpen: number,
   targetLeveragedWeight: number,
-  input: BacktestInput,
+  strategy: StrategyConfig,
   useCash: number,
 ): { tradedValue: number; cost: number } => {
   const prototypeBefore = position.prototypeShares * prototypeOpen;
@@ -94,58 +100,89 @@ const rebalance = (
   const sellValue =
     Math.max(0, leveragedBefore - targetLeveragedBeforeCost) +
     Math.max(0, prototypeBefore - targetPrototypeBeforeCost);
-  const cost = Math.min(capital, feeForTrade(buyValue, sellValue, input));
+  const tradedValue = buyValue + sellValue;
+  if (tradedValue <= TRADE_TOLERANCE) {
+    return { tradedValue: 0, cost: 0 };
+  }
+
+  const cost = Math.min(capital, feeForTrade(buyValue, sellValue, strategy));
   const afterCost = Math.max(0, capital - cost);
   const targetLeveraged = afterCost * (targetLeveragedWeight / 100);
   const targetPrototype = afterCost - targetLeveraged;
   position.prototypeShares = targetPrototype / prototypeOpen;
   position.leveragedShares = targetLeveraged / leveragedOpen;
   position.cash -= useCash;
-  return { tradedValue: buyValue + sellValue, cost };
+  return { tradedValue, cost };
 };
 
-const scheduleDue = (
-  mode: BacktestInput['strategy']['rebalance']['mode'],
-  current: IsoDate,
-  next: IsoDate,
-): boolean => {
-  if (mode === 'daily') return true;
-  const a = new Date(`${current}T00:00:00Z`);
-  const b = new Date(`${next}T00:00:00Z`);
-  if (mode === 'weekly') {
-    const week = (date: Date): number =>
-      Math.floor(
-        (Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) -
-          Date.UTC(date.getUTCFullYear(), 0, 1)) /
-          604_800_000,
-      );
-    return a.getUTCFullYear() !== b.getUTCFullYear() || week(a) !== week(b);
+const affordableCashPurchase = (
+  cash: number,
+  strategy: StrategyConfig,
+): number => {
+  if (!strategy.costs.enabled) return cash;
+
+  const { commissionRate, slippageRate, minimumCommission } = strategy.costs;
+  if (cash <= minimumCommission) return 0;
+
+  const purchaseWithMinimumCommission =
+    (cash - minimumCommission) / (1 + slippageRate);
+  if (
+    purchaseWithMinimumCommission * commissionRate <= minimumCommission
+  ) {
+    return purchaseWithMinimumCommission;
   }
-  if (mode === 'monthly') return a.getUTCMonth() !== b.getUTCMonth();
-  if (mode === 'quarterly') {
-    return (
-      a.getUTCFullYear() !== b.getUTCFullYear() ||
-      Math.floor(a.getUTCMonth() / 3) !== Math.floor(b.getUTCMonth() / 3)
-    );
+  return cash / (1 + commissionRate + slippageRate);
+};
+
+const investCashTowardFloor = (
+  position: Position,
+  prototypeOpen: number,
+  leveragedOpen: number,
+  targetLeveragedWeight: number,
+  strategy: StrategyConfig,
+): { tradedValue: number; cost: number } => {
+  const cashBefore = position.cash;
+  const tradedValue = affordableCashPurchase(cashBefore, strategy);
+  if (tradedValue <= TRADE_TOLERANCE) {
+    return { tradedValue: 0, cost: 0 };
   }
-  if (mode === 'annual') return a.getUTCFullYear() !== b.getUTCFullYear();
-  return false;
+
+  const prototypeBefore = position.prototypeShares * prototypeOpen;
+  const leveragedBefore = position.leveragedShares * leveragedOpen;
+  const totalValue = prototypeBefore + leveragedBefore + cashBefore;
+  const missingLeveragedValue = Math.max(
+    0,
+    totalValue * (targetLeveragedWeight / 100) - leveragedBefore,
+  );
+  const leveragedPurchase = Math.min(tradedValue, missingLeveragedValue);
+  const prototypePurchase = tradedValue - leveragedPurchase;
+  const cost = feeForTrade(tradedValue, 0, strategy);
+  const cashAfter = cashBefore - tradedValue - cost;
+  if (cashAfter < -TRADE_TOLERANCE) {
+    return { tradedValue: 0, cost: 0 };
+  }
+
+  position.prototypeShares += prototypePurchase / prototypeOpen;
+  position.leveragedShares += leveragedPurchase / leveragedOpen;
+  position.cash = Math.max(0, cashAfter);
+  return { tradedValue, cost };
 };
 
 const historyState = (
   rows: AlignedBar[],
-  input: BacktestInput,
+  strategy: StrategyConfig,
+  startDate: IsoDate,
 ): RegimeSnapshot | undefined => {
-  const totalReturn = input.strategy.dividendMode === 'total-return';
+  const totalReturn = strategy.dividendMode === 'total-return';
   let state: RegimeSnapshot | undefined;
-  for (const row of rows.filter((item) => item.date < input.startDate)) {
+  for (const row of rows.filter((item) => item.date < startDate)) {
     const price = effectivePrice(row.prototype, 'close', totalReturn);
     state = state
       ? advanceRegime(
           state,
           price,
           row.date,
-          input.strategy.recoveryConfirmationPct,
+          strategy.recoveryConfirmationPct,
         )
       : initialRegime(price, row.date);
   }
@@ -153,7 +190,8 @@ const historyState = (
 };
 
 export function runBacktest(input: BacktestInput): BacktestResult {
-  const errors = validateStrategy(input.strategy);
+  const strategy = normalizeStrategyConfig(input.strategy);
+  const errors = validateStrategy(strategy);
   if (errors.length) throw new Error(errors.join('；'));
   if (!(input.initialCapital > 0)) throw new Error('初始投入金額必須大於零');
 
@@ -163,7 +201,9 @@ export function runBacktest(input: BacktestInput): BacktestResult {
   );
   if (!selected.length) throw new Error('指定期間沒有共同交易日');
 
-  const totalReturn = input.strategy.dividendMode === 'total-return';
+  const firstRow = selected[0] as AlignedBar;
+  const effectiveStartDate = firstRow.date;
+  const totalReturn = strategy.dividendMode === 'total-return';
   const prototypeDividends = new Map(
     input.prototype.dividends.map((event) => [event.date, event.amountPerShare]),
   );
@@ -174,14 +214,13 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     (input.dividendReinvestments ?? []).map((item) => [item.date, item.target]),
   );
 
-  let regime = historyState(aligned, input);
-  const initialWeight = regime
-    ? resolveTargetAllocation(input.strategy, regime).leveragedWeight
-    : input.strategy.baseLeveragedWeight;
-  let currentTarget = initialWeight;
+  let regime = historyState(aligned, strategy, effectiveStartDate);
+  let currentRuleFloor = strategy.baseLeveragedWeight;
+  let activeRuleKey: string | undefined;
   let pending: PendingTrade | undefined = {
-    targetLeveragedWeight: initialWeight,
+    targetLeveragedWeight: strategy.baseLeveragedWeight,
     reason: 'INITIAL',
+    policy: 'exact-target',
     note: '依開始日前已知資料建立初始持倉',
   };
   const position: Position = {
@@ -193,7 +232,6 @@ export function runBacktest(input: BacktestInput): BacktestResult {
   const trades: TradeRecord[] = [];
   let runningPeak = input.initialCapital;
 
-  const firstRow = selected[0] as AlignedBar;
   const firstPrototypeOpen = effectivePrice(
     firstRow.prototype,
     'open',
@@ -216,57 +254,86 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       const leveragedBefore = position.leveragedShares * leveragedOpen;
       const cashBefore = position.cash;
       const useCash = pending.reason === 'INITIAL' ? position.cash : 0;
-      const execution = rebalance(
-        position,
-        prototypeOpen,
-        leveragedOpen,
-        pending.targetLeveragedWeight,
-        input,
-        useCash,
-      );
-      currentTarget = pending.targetLeveragedWeight;
-      trades.push({
-        date: row.date,
-        reason: pending.reason,
-        prototypeValueBefore: prototypeBefore,
-        leveragedValueBefore: leveragedBefore,
-        cashBefore,
-        targetLeveragedWeight: currentTarget,
-        tradedValue: execution.tradedValue,
-        cost: execution.cost,
-        note: pending.note,
-      });
+      const investedBefore = prototypeBefore + leveragedBefore;
+      const actualLeveragedWeight =
+        investedBefore > 0 ? (leveragedBefore / investedBefore) * 100 : 0;
+      const shouldTrade =
+        pending.reason === 'INITIAL' ||
+        (pending.policy === 'exact-target'
+          ? Math.abs(
+              actualLeveragedWeight - pending.targetLeveragedWeight,
+            ) > TRADE_TOLERANCE
+          : actualLeveragedWeight + TRADE_TOLERANCE <
+            pending.targetLeveragedWeight);
+
+      if (shouldTrade) {
+        const execution = rebalance(
+          position,
+          prototypeOpen,
+          leveragedOpen,
+          pending.targetLeveragedWeight,
+          strategy,
+          useCash,
+        );
+        if (execution.tradedValue > TRADE_TOLERANCE) {
+          trades.push({
+            date: row.date,
+            reason: pending.reason,
+            prototypeValueBefore: prototypeBefore,
+            leveragedValueBefore: leveragedBefore,
+            cashBefore,
+            targetLeveragedWeight: pending.targetLeveragedWeight,
+            tradedValue: execution.tradedValue,
+            cost: execution.cost,
+            note: pending.note,
+          });
+        }
+      }
       pending = undefined;
     }
 
     const reinvestTarget = reinvestments.get(row.date);
     if (reinvestTarget && position.cash > 0) {
+      const prototypeBefore = position.prototypeShares * prototypeOpen;
+      const leveragedBefore = position.leveragedShares * leveragedOpen;
       const cashBefore = position.cash;
-      let leveragedWeight = currentTarget;
+      let leveragedWeight = currentRuleFloor;
       if (reinvestTarget === 'prototype') leveragedWeight = 0;
       if (reinvestTarget === 'leveraged') leveragedWeight = 100;
-      const execution = rebalance(
-        position,
-        prototypeOpen,
-        leveragedOpen,
-        leveragedWeight,
-        input,
-        position.cash,
-      );
-      trades.push({
-        date: row.date,
-        reason: 'DIVIDEND_REINVEST',
-        prototypeValueBefore: position.prototypeShares * prototypeOpen,
-        leveragedValueBefore: position.leveragedShares * leveragedOpen,
-        cashBefore,
-        targetLeveragedWeight: leveragedWeight,
-        tradedValue: execution.tradedValue,
-        cost: execution.cost,
-        note: `待投入股息投入 ${reinvestTarget}`,
-      });
+      const execution =
+        reinvestTarget === 'target-allocation' &&
+        strategy.allocationPolicy === 'minimum-floor'
+          ? investCashTowardFloor(
+              position,
+              prototypeOpen,
+              leveragedOpen,
+              leveragedWeight,
+              strategy,
+            )
+          : rebalance(
+              position,
+              prototypeOpen,
+              leveragedOpen,
+              leveragedWeight,
+              strategy,
+              position.cash,
+            );
+      if (execution.tradedValue > TRADE_TOLERANCE) {
+        trades.push({
+          date: row.date,
+          reason: 'DIVIDEND_REINVEST',
+          prototypeValueBefore: prototypeBefore,
+          leveragedValueBefore: leveragedBefore,
+          cashBefore,
+          targetLeveragedWeight: leveragedWeight,
+          tradedValue: execution.tradedValue,
+          cost: execution.cost,
+          note: `待投入股息投入 ${reinvestTarget}`,
+        });
+      }
     }
 
-    if (input.strategy.dividendMode === 'cash') {
+    if (strategy.dividendMode === 'cash') {
       position.cash +=
         position.prototypeShares * (prototypeDividends.get(row.date) ?? 0);
       position.cash +=
@@ -289,9 +356,17 @@ export function runBacktest(input: BacktestInput): BacktestResult {
           regime,
           prototypeClose,
           row.date,
-          input.strategy.recoveryConfirmationPct,
+          strategy.recoveryConfirmationPct,
         )
       : initialRegime(prototypeClose, row.date);
+
+    const decision = resolveAllocationRule(strategy, regime);
+    const ruleChanged = decision?.ruleKey !== activeRuleKey;
+    activeRuleKey = decision?.ruleKey;
+    if (decision && ruleChanged) {
+      currentRuleFloor = decision.leveragedWeight;
+    }
+    const next = selected[index + 1];
 
     points.push({
       date: row.date,
@@ -301,7 +376,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       cash: position.cash,
       prototypeWeight,
       leveragedWeight,
-      targetLeveragedWeight: currentTarget,
+      targetLeveragedWeight: currentRuleFloor,
       nominalExposure:
         prototypeWeight +
         leveragedWeight * input.pair.leveraged.nominalLeverage,
@@ -313,35 +388,41 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         input.initialCapital * (leveragedClose / firstLeveragedOpen),
     });
 
-    const decision = resolveTargetAllocation(input.strategy, regime);
-    const next = selected[index + 1];
     if (!next) return;
 
-    if (Math.abs(decision.leveragedWeight - currentTarget) > 1e-9) {
+    const rebalanceConfig = strategy.rebalance;
+    const mode = rebalanceConfig.mode;
+    if (
+      scheduledRebalanceDue(
+        rebalanceConfig,
+        effectiveStartDate,
+        row.date,
+        next.date,
+      )
+    ) {
+      pending = {
+        targetLeveragedWeight: currentRuleFloor,
+        reason: 'SCHEDULED_REBALANCE',
+        note: `${mode} 定期再平衡`,
+        policy: 'exact-target',
+      };
+    } else if (
+      mode === 'drift' &&
+      Math.abs(leveragedWeight - currentRuleFloor) >=
+        strategy.rebalance.driftThreshold
+    ) {
+      pending = {
+        targetLeveragedWeight: currentRuleFloor,
+        reason: 'DRIFT_REBALANCE',
+        note: `實際權重偏離 ${Math.abs(leveragedWeight - currentRuleFloor).toFixed(2)} 個百分點`,
+        policy: 'exact-target',
+      };
+    } else if (decision && ruleChanged) {
       pending = {
         targetLeveragedWeight: decision.leveragedWeight,
         reason: decision.reason,
         note: `${regime.regime}：距前高 ${regime.distanceToHighPct.toFixed(2)}%`,
-      };
-      return;
-    }
-
-    const mode = input.strategy.rebalance.mode;
-    if (scheduleDue(mode, row.date, next.date)) {
-      pending = {
-        targetLeveragedWeight: currentTarget,
-        reason: 'SCHEDULED_REBALANCE',
-        note: `${mode} 定期再平衡`,
-      };
-    } else if (
-      mode === 'drift' &&
-      Math.abs(leveragedWeight - currentTarget) >=
-        input.strategy.rebalance.driftThreshold
-    ) {
-      pending = {
-        targetLeveragedWeight: currentTarget,
-        reason: 'DRIFT_REBALANCE',
-        note: `實際權重偏離 ${Math.abs(leveragedWeight - currentTarget).toFixed(2)} 個百分點`,
+        policy: strategy.allocationPolicy,
       };
     }
   });
@@ -354,10 +435,10 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     input.annualRiskFreeRate,
   );
   const resultWithoutFingerprint = {
-    id: `${input.strategy.id}-${input.startDate}-${input.endDate}`,
+    id: `${strategy.id}-${input.startDate}-${input.endDate}`,
     pairId: input.pair.id,
-    strategy: input.strategy,
-    startDate: (selected[0] as AlignedBar).date,
+    strategy,
+    startDate: effectiveStartDate,
     endDate: (selected.at(-1) as AlignedBar).date,
     initialCapital: input.initialCapital,
     points,

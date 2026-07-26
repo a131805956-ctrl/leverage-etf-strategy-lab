@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { advanceRegime, initialRegime } from '../src/core/regime';
-import { resolveTargetAllocation } from '../src/core/rules';
+import { resolveAllocationRule } from '../src/core/rules';
 import type { IsoDate, StrategyConfig } from '../src/core/types';
 
 const strategy: StrategyConfig = {
   id: 'test',
   name: 'test',
   pairId: 'tw50',
+  allocationPolicy: 'exact-target',
   baseLeveragedWeight: 60,
   highLeveragedWeight: 70,
   drawdownRules: [
@@ -19,7 +20,7 @@ const strategy: StrategyConfig = {
     { distanceToHigh: 10, leveragedWeight: 70 },
   ],
   recoveryConfirmationPct: 5,
-  rebalance: { mode: 'event', driftThreshold: 5 },
+  rebalance: { mode: 'none', driftThreshold: 5 },
   dividendMode: 'total-return',
   execution: 'next-open',
   costs: {
@@ -69,21 +70,55 @@ describe('market regime', () => {
 });
 
 describe('allocation rules', () => {
-  it('uses drawdown loading rules while declining', () => {
+  it('emits a stable key at a new high', () => {
+    expect(resolveAllocationRule(strategy, initialRegime(100, date(1)))).toEqual({
+      ruleKey: 'new-high',
+      leveragedWeight: 70,
+      reason: 'NEW_HIGH',
+    });
+  });
+
+  it('does not fall back to the initial weight below the first drawdown step', () => {
+    const state = advanceRegime(initialRegime(100, date(1)), 95, date(2), 5);
+    expect(resolveAllocationRule(strategy, state)).toBeUndefined();
+  });
+
+  it('emits a stable key for the deepest reached drawdown step', () => {
     const state = advanceRegime(initialRegime(100, date(1)), 80, date(2), 5);
-    expect(resolveTargetAllocation(strategy, state)).toEqual({
+    expect(resolveAllocationRule(strategy, state)).toEqual({
+      ruleKey: 'drawdown:20',
       leveragedWeight: 100,
       reason: 'DRAWDOWN',
     });
   });
 
-  it('uses recovery unloading rules at the same distance to high', () => {
+  it('emits a recovery key without a drawdown fallback', () => {
     const decline = advanceRegime(initialRegime(100, date(1)), 75, date(2), 5);
     const recovery = advanceRegime(decline, 80, date(3), 5);
     expect(recovery.regime).toBe('RECOVERY');
-    expect(resolveTargetAllocation(strategy, recovery)).toEqual({
+    expect(resolveAllocationRule(strategy, recovery)).toEqual({
+      ruleKey: 'recovery:20',
       leveragedWeight: 85,
       reason: 'RECOVERY',
     });
+  });
+
+  it('returns undefined when no recovery rule applies', () => {
+    const decline = advanceRegime(initialRegime(100, date(1)), 75, date(2), 5);
+    const recovery = advanceRegime(decline, 78.75, date(3), 5);
+    expect(recovery.regime).toBe('RECOVERY');
+    expect(resolveAllocationRule(strategy, recovery)).toBeUndefined();
+  });
+
+  it('does not mutate configured rule arrays while resolving events', () => {
+    const before = structuredClone(strategy);
+    const decline = advanceRegime(initialRegime(100, date(1)), 80, date(2), 5);
+    const recovery = advanceRegime(decline, 84, date(3), 5);
+
+    resolveAllocationRule(strategy, decline);
+    resolveAllocationRule(strategy, recovery);
+
+    expect(strategy.drawdownRules).toEqual(before.drawdownRules);
+    expect(strategy.recoveryRules).toEqual(before.recoveryRules);
   });
 });

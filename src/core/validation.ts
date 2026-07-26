@@ -10,6 +10,12 @@ export function validateStrategy(strategy: StrategyConfig): string[] {
   const errors: string[] = [];
 
   if (!strategy.name.trim()) errors.push('策略名稱不可空白');
+  if (
+    strategy.allocationPolicy !== 'minimum-floor' &&
+    strategy.allocationPolicy !== 'exact-target'
+  ) {
+    errors.push('配置政策必須是最低底線或精確目標');
+  }
   if (!inPercentRange(strategy.baseLeveragedWeight)) {
     errors.push('基礎槓桿 ETF 權重必須介於 0% 到 100%');
   }
@@ -44,6 +50,20 @@ export function validateStrategy(strategy: StrategyConfig): string[] {
   }
   if (strategy.execution !== 'next-open') {
     errors.push('正式回測只允許下一交易日開盤成交');
+  }
+  if (
+    strategy.rebalance.mode === 'calendar-interval' &&
+    (!Number.isInteger(strategy.rebalance.intervalDays) ||
+      (strategy.rebalance.intervalDays ?? 0) <= 0)
+  ) {
+    errors.push('日曆天再平衡必須是正整數');
+  }
+  if (
+    !Number.isFinite(strategy.rebalance.driftThreshold) ||
+    strategy.rebalance.driftThreshold <= 0 ||
+    strategy.rebalance.driftThreshold > 50
+  ) {
+    errors.push('權重偏離門檻必須大於 0 且不超過 50 個百分點');
   }
   if (strategy.costs.enabled) {
     const costValues = [
