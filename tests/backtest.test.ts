@@ -7,6 +7,7 @@ import type {
   LegacyStrategyConfig,
   MarketSeries,
   PriceBar,
+  StrategyConfig,
 } from '../src/core/types';
 
 const bar = (
@@ -82,6 +83,175 @@ const seriesForDates = (symbol: string, dates: IsoDate[]): MarketSeries => ({
   dividends: [],
 });
 
+const profitRunStrategy = (
+  overrides: Partial<StrategyConfig> = {},
+): StrategyConfig => ({
+  id: 'profit-run',
+  name: 'Profit run',
+  pairId: 'pair',
+  allocationPolicy: 'minimum-floor',
+  baseLeveragedWeight: 60,
+  highLeveragedWeight: 70,
+  drawdownRules: [{ threshold: 10, leveragedWeight: 80 }],
+  recoveryRules: [{ distanceToHigh: 20, leveragedWeight: 70 }],
+  recoveryConfirmationPct: 5,
+  rebalance: { mode: 'none', driftThreshold: 5 },
+  dividendMode: 'price-only',
+  execution: 'next-open',
+  costs: {
+    enabled: false,
+    commissionRate: 0,
+    sellTaxRate: 0,
+    slippageRate: 0,
+    minimumCommission: 0,
+  },
+  ...overrides,
+});
+
+const pathSeries = (
+  symbol: string,
+  rows: Array<[IsoDate, number, number]>,
+): MarketSeries => ({
+  symbol,
+  bars: rows.map(([date, open, close]) => bar(date, open, close)),
+  dividends: [],
+});
+
+const profitRunInput = (): BacktestInput =>
+  input({
+    strategy: profitRunStrategy(),
+    prototype: pathSeries('BASE', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, 101],
+      ['2024-01-03', 101, 95.95],
+      ['2024-01-04', 95.95, 95.95],
+    ]),
+    leveraged: pathSeries('LEV', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, 100],
+      ['2024-01-03', 100, 100],
+      ['2024-01-04', 100, 100],
+    ]),
+  });
+
+const raisedFloorInput = (
+  allocationPolicy: StrategyConfig['allocationPolicy'],
+  leveragedDeclineClose: number,
+  raisedFloor = 80,
+): BacktestInput =>
+  input({
+    strategy: profitRunStrategy({
+      allocationPolicy,
+      highLeveragedWeight: 60,
+      drawdownRules: [{ threshold: 10, leveragedWeight: raisedFloor }],
+      recoveryRules: [],
+    }),
+    prototype: pathSeries('BASE', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, 89],
+      ['2024-01-03', 89, 89],
+    ]),
+    leveraged: pathSeries('LEV', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, leveragedDeclineClose],
+      ['2024-01-03', leveragedDeclineClose, leveragedDeclineClose],
+    ]),
+    endDate: '2024-01-03',
+  });
+
+const alreadyAboveFloorInput = (
+  allocationPolicy: StrategyConfig['allocationPolicy'] = 'minimum-floor',
+): BacktestInput => raisedFloorInput(allocationPolicy, 300);
+
+const belowRaisedFloorInput = (): BacktestInput =>
+  raisedFloorInput('minimum-floor', 50, 90);
+
+const recoveryFloorInput = (): BacktestInput =>
+  input({
+    strategy: profitRunStrategy({
+      baseLeveragedWeight: 80,
+      highLeveragedWeight: 80,
+      drawdownRules: [{ threshold: 10, leveragedWeight: 90 }],
+    }),
+    prototype: pathSeries('BASE', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, 80],
+      ['2024-01-03', 80, 84],
+      ['2024-01-04', 84, 84],
+    ]),
+    leveraged: pathSeries('LEV', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, 100],
+      ['2024-01-03', 100, 100],
+      ['2024-01-04', 100, 100],
+    ]),
+  });
+
+const unchangedFloorDriftInput = (): BacktestInput =>
+  input({
+    strategy: profitRunStrategy({
+      highLeveragedWeight: 60,
+      recoveryRules: [],
+    }),
+    prototype: pathSeries('BASE', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, 89],
+      ['2024-01-03', 89, 85],
+      ['2024-01-04', 85, 85],
+    ]),
+    leveraged: pathSeries('LEV', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, 50],
+      ['2024-01-03', 50, 25],
+      ['2024-01-04', 25, 25],
+    ]),
+  });
+
+const reenteredRuleInput = (): BacktestInput =>
+  input({
+    strategy: profitRunStrategy({
+      highLeveragedWeight: 60,
+      recoveryRules: [],
+      recoveryConfirmationPct: 50,
+    }),
+    prototype: pathSeries('BASE', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, 89],
+      ['2024-01-03', 89, 95],
+      ['2024-01-04', 95, 89],
+      ['2024-01-05', 89, 89],
+    ]),
+    leveraged: pathSeries('LEV', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 100, 50],
+      ['2024-01-03', 50, 25],
+      ['2024-01-04', 25, 20],
+      ['2024-01-05', 20, 20],
+    ]),
+    endDate: '2024-01-05',
+  });
+
+const coincidentScheduleInput = (): BacktestInput =>
+  input({
+    strategy: profitRunStrategy({
+      highLeveragedWeight: 60,
+      recoveryRules: [],
+      rebalance: { mode: 'monthly', driftThreshold: 5 },
+    }),
+    prototype: pathSeries('BASE', [
+      ['2024-01-30', 100, 100],
+      ['2024-01-31', 100, 89],
+      ['2024-02-01', 89, 89],
+    ]),
+    leveraged: pathSeries('LEV', [
+      ['2024-01-30', 100, 100],
+      ['2024-01-31', 100, 50],
+      ['2024-02-01', 50, 50],
+    ]),
+    startDate: '2024-01-30',
+    endDate: '2024-02-01',
+  });
+
 const input = (
   overrides: Partial<BacktestInput> = {},
 ): BacktestInput => ({
@@ -115,8 +285,106 @@ describe('runBacktest', () => {
       input({ startDate: '2024-01-03', endDate: '2024-01-04' }),
     );
     expect(result.points[0]?.date).toBe('2024-01-03');
-    expect(result.points[0]?.leveragedWeight).toBeCloseTo(100);
+    expect(result.points[0]?.leveragedWeight).toBeCloseTo(0);
     expect(result.trades[0]?.reason).toBe('INITIAL');
+  });
+
+  it('uses the initial weight once and never falls back after a new high', () => {
+    const result = runBacktest(profitRunInput());
+
+    expect(result.trades[0]).toMatchObject({
+      reason: 'INITIAL',
+      targetLeveragedWeight: 60,
+    });
+    expect(
+      result.trades.some(
+        (trade, index) =>
+          index > 0 && trade.targetLeveragedWeight === 60,
+      ),
+    ).toBe(false);
+    expect(result.points.at(-1)?.targetLeveragedWeight).toBe(70);
+  });
+
+  it('does not sell when actual leveraged weight is above a higher floor', () => {
+    const result = runBacktest(alreadyAboveFloorInput());
+
+    expect(
+      result.trades.filter((trade) => trade.reason === 'DRAWDOWN'),
+    ).toHaveLength(0);
+    expect(result.points.at(-1)?.targetLeveragedWeight).toBe(80);
+    expect(result.metrics.tradeCount).toBe(1);
+    expect(result.metrics.turnover).toBeCloseTo(100);
+    expect(result.metrics.totalCosts).toBe(0);
+  });
+
+  it('buys only enough to reach a newly raised floor', () => {
+    const result = runBacktest(belowRaisedFloorInput());
+    const trade = result.trades.find((item) => item.reason === 'DRAWDOWN');
+
+    expect(trade?.targetLeveragedWeight).toBe(90);
+    expect(
+      result.points.find((point) => point.date === trade?.date)
+        ?.leveragedWeight,
+    ).toBeCloseTo(90);
+  });
+
+  it('updates a lower recovery floor without selling', () => {
+    const result = runBacktest(recoveryFloorInput());
+
+    expect(result.points.at(-1)?.targetLeveragedWeight).toBe(70);
+    expect(
+      result.trades.some((trade) => trade.reason === 'RECOVERY'),
+    ).toBe(false);
+  });
+
+  it('does not micro-rebalance after weight drifts below an unchanged floor', () => {
+    const result = runBacktest(unchangedFloorDriftInput());
+
+    expect(
+      result.trades.filter((trade) => trade.reason === 'DRAWDOWN'),
+    ).toHaveLength(1);
+    expect(result.points.at(-1)?.leveragedWeight).toBeLessThan(80);
+  });
+
+  it('allows the same keyed rule to trigger after an undefined interval', () => {
+    const result = runBacktest(reenteredRuleInput());
+
+    expect(
+      result.trades
+        .filter((trade) => trade.reason === 'DRAWDOWN')
+        .map((trade) => trade.date),
+    ).toEqual(['2024-01-03', '2024-01-05']);
+  });
+
+  it('keeps exact-target allocation behavior for changed rule events', () => {
+    const result = runBacktest(alreadyAboveFloorInput('exact-target'));
+    const drawdownTrade = result.trades.find(
+      (trade) => trade.reason === 'DRAWDOWN',
+    );
+
+    expect(drawdownTrade).toBeDefined();
+    expect(
+      result.points.find((point) => point.date === drawdownTrade?.date)
+        ?.leveragedWeight,
+    ).toBeCloseTo(80);
+  });
+
+  it('uses one exact scheduled trade at an updated coincident rule floor', () => {
+    const result = runBacktest(coincidentScheduleInput());
+
+    expect(
+      result.trades.filter((trade) => trade.reason === 'DRAWDOWN'),
+    ).toHaveLength(0);
+    expect(
+      result.trades.filter(
+        (trade) => trade.reason === 'SCHEDULED_REBALANCE',
+      ),
+    ).toHaveLength(1);
+    expect(
+      result.trades.find(
+        (trade) => trade.reason === 'SCHEDULED_REBALANCE',
+      )?.targetLeveragedWeight,
+    ).toBe(80);
   });
 
   it('anchors a non-common requested date to the first common trading date', () => {
@@ -147,7 +415,11 @@ describe('runBacktest', () => {
       symbol: 'LEV',
       bars: dates
         .filter((date) => date !== '2024-01-01')
-        .map((date) => bar(date, 100, 100)),
+        .map((date) => {
+          if (date === '2024-01-31') return bar(date, 100, 110);
+          if (date === '2024-02-05') return bar(date, 110, 110);
+          return bar(date, 100, 100);
+        }),
       dividends: [],
     };
 
@@ -160,6 +432,8 @@ describe('runBacktest', () => {
         strategy: {
           ...strategy,
           allocationPolicy: 'exact-target',
+          baseLeveragedWeight: 50,
+          highLeveragedWeight: 50,
           drawdownRules: [],
           recoveryRules: [],
           rebalance: {
@@ -179,11 +453,20 @@ describe('runBacktest', () => {
 
   it('normalizes legacy daily scheduling at the backtest entry boundary', () => {
     const dates: IsoDate[] = ['2024-01-01', '2024-01-02', '2024-01-03'];
+    const dailyStrategy = legacySchedulingStrategy('daily');
     const result = runBacktest(
       input({
         prototype: seriesForDates('BASE', dates),
-        leveraged: seriesForDates('LEV', dates),
-        strategy: legacySchedulingStrategy('daily'),
+        leveraged: pathSeries('LEV', [
+          ['2024-01-01', 100, 110],
+          ['2024-01-02', 110, 120],
+          ['2024-01-03', 120, 120],
+        ]),
+        strategy: {
+          ...dailyStrategy,
+          baseLeveragedWeight: 50,
+          highLeveragedWeight: 50,
+        },
       }),
     );
 
@@ -200,12 +483,21 @@ describe('runBacktest', () => {
 
   it('normalizes legacy weekly scheduling at the backtest entry boundary', () => {
     const dates: IsoDate[] = ['2024-01-01', '2024-01-05', '2024-01-08'];
+    const weeklyStrategy = legacySchedulingStrategy('weekly');
     const result = runBacktest(
       input({
         prototype: seriesForDates('BASE', dates),
-        leveraged: seriesForDates('LEV', dates),
+        leveraged: pathSeries('LEV', [
+          ['2024-01-01', 100, 100],
+          ['2024-01-05', 100, 110],
+          ['2024-01-08', 110, 110],
+        ]),
         endDate: '2024-01-08',
-        strategy: legacySchedulingStrategy('weekly'),
+        strategy: {
+          ...weeklyStrategy,
+          baseLeveragedWeight: 50,
+          highLeveragedWeight: 50,
+        },
       }),
     );
 
@@ -225,11 +517,16 @@ describe('runBacktest', () => {
     const result = runBacktest(
       input({
         prototype: seriesForDates('BASE', dates),
-        leveraged: seriesForDates('LEV', dates),
+        leveraged: pathSeries('LEV', [
+          ['2024-01-01', 100, 110],
+          ['2024-01-20', 110, 110],
+        ]),
         endDate: '2024-01-20',
         strategy: {
           ...strategy,
           allocationPolicy: 'exact-target',
+          baseLeveragedWeight: 50,
+          highLeveragedWeight: 50,
           drawdownRules: [],
           recoveryRules: [],
           rebalance: {

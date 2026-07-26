@@ -33,7 +33,10 @@ interface PendingTrade {
   targetLeveragedWeight: number;
   reason: TradeReason;
   note: string;
+  policy: 'exact-target' | 'minimum-floor';
 }
+
+const TRADE_TOLERANCE = 1e-9;
 
 const effectivePrice = (
   bar: PriceBar,
@@ -154,14 +157,12 @@ export function runBacktest(input: BacktestInput): BacktestResult {
   );
 
   let regime = historyState(aligned, strategy, effectiveStartDate);
-  const initialWeight = regime
-    ? (resolveAllocationRule(strategy, regime)?.leveragedWeight ??
-      strategy.baseLeveragedWeight)
-    : strategy.baseLeveragedWeight;
-  let currentTarget = initialWeight;
+  let currentRuleFloor = strategy.baseLeveragedWeight;
+  let activeRuleKey: string | undefined;
   let pending: PendingTrade | undefined = {
-    targetLeveragedWeight: initialWeight,
+    targetLeveragedWeight: strategy.baseLeveragedWeight,
     reason: 'INITIAL',
+    policy: 'exact-target',
     note: '依開始日前已知資料建立初始持倉',
   };
   const position: Position = {
@@ -195,33 +196,48 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       const leveragedBefore = position.leveragedShares * leveragedOpen;
       const cashBefore = position.cash;
       const useCash = pending.reason === 'INITIAL' ? position.cash : 0;
-      const execution = rebalance(
-        position,
-        prototypeOpen,
-        leveragedOpen,
-        pending.targetLeveragedWeight,
-        strategy,
-        useCash,
-      );
-      currentTarget = pending.targetLeveragedWeight;
-      trades.push({
-        date: row.date,
-        reason: pending.reason,
-        prototypeValueBefore: prototypeBefore,
-        leveragedValueBefore: leveragedBefore,
-        cashBefore,
-        targetLeveragedWeight: currentTarget,
-        tradedValue: execution.tradedValue,
-        cost: execution.cost,
-        note: pending.note,
-      });
+      const investedBefore = prototypeBefore + leveragedBefore;
+      const actualLeveragedWeight =
+        investedBefore > 0 ? (leveragedBefore / investedBefore) * 100 : 0;
+      const shouldTrade =
+        pending.reason === 'INITIAL' ||
+        (pending.policy === 'exact-target'
+          ? Math.abs(
+              actualLeveragedWeight - pending.targetLeveragedWeight,
+            ) > TRADE_TOLERANCE
+          : actualLeveragedWeight + TRADE_TOLERANCE <
+            pending.targetLeveragedWeight);
+
+      if (shouldTrade) {
+        const execution = rebalance(
+          position,
+          prototypeOpen,
+          leveragedOpen,
+          pending.targetLeveragedWeight,
+          strategy,
+          useCash,
+        );
+        if (execution.tradedValue > TRADE_TOLERANCE) {
+          trades.push({
+            date: row.date,
+            reason: pending.reason,
+            prototypeValueBefore: prototypeBefore,
+            leveragedValueBefore: leveragedBefore,
+            cashBefore,
+            targetLeveragedWeight: pending.targetLeveragedWeight,
+            tradedValue: execution.tradedValue,
+            cost: execution.cost,
+            note: pending.note,
+          });
+        }
+      }
       pending = undefined;
     }
 
     const reinvestTarget = reinvestments.get(row.date);
     if (reinvestTarget && position.cash > 0) {
       const cashBefore = position.cash;
-      let leveragedWeight = currentTarget;
+      let leveragedWeight = currentRuleFloor;
       if (reinvestTarget === 'prototype') leveragedWeight = 0;
       if (reinvestTarget === 'leveraged') leveragedWeight = 100;
       const execution = rebalance(
@@ -272,6 +288,14 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         )
       : initialRegime(prototypeClose, row.date);
 
+    const decision = resolveAllocationRule(strategy, regime);
+    const ruleChanged = decision?.ruleKey !== activeRuleKey;
+    activeRuleKey = decision?.ruleKey;
+    if (decision && ruleChanged) {
+      currentRuleFloor = decision.leveragedWeight;
+    }
+    const next = selected[index + 1];
+
     points.push({
       date: row.date,
       value,
@@ -280,7 +304,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       cash: position.cash,
       prototypeWeight,
       leveragedWeight,
-      targetLeveragedWeight: currentTarget,
+      targetLeveragedWeight: currentRuleFloor,
       nominalExposure:
         prototypeWeight +
         leveragedWeight * input.pair.leveraged.nominalLeverage,
@@ -292,21 +316,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         input.initialCapital * (leveragedClose / firstLeveragedOpen),
     });
 
-    const decision = resolveAllocationRule(strategy, regime);
-    const next = selected[index + 1];
     if (!next) return;
-
-    if (
-      decision &&
-      Math.abs(decision.leveragedWeight - currentTarget) > 1e-9
-    ) {
-      pending = {
-        targetLeveragedWeight: decision.leveragedWeight,
-        reason: decision.reason,
-        note: `${regime.regime}：距前高 ${regime.distanceToHighPct.toFixed(2)}%`,
-      };
-      return;
-    }
 
     const rebalanceConfig = strategy.rebalance;
     const mode = rebalanceConfig.mode;
@@ -319,19 +329,28 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       )
     ) {
       pending = {
-        targetLeveragedWeight: currentTarget,
+        targetLeveragedWeight: currentRuleFloor,
         reason: 'SCHEDULED_REBALANCE',
         note: `${mode} 定期再平衡`,
+        policy: 'exact-target',
+      };
+    } else if (decision && ruleChanged) {
+      pending = {
+        targetLeveragedWeight: decision.leveragedWeight,
+        reason: decision.reason,
+        note: `${regime.regime}：距前高 ${regime.distanceToHighPct.toFixed(2)}%`,
+        policy: strategy.allocationPolicy,
       };
     } else if (
       mode === 'drift' &&
-      Math.abs(leveragedWeight - currentTarget) >=
+      Math.abs(leveragedWeight - currentRuleFloor) >=
         strategy.rebalance.driftThreshold
     ) {
       pending = {
-        targetLeveragedWeight: currentTarget,
+        targetLeveragedWeight: currentRuleFloor,
         reason: 'DRIFT_REBALANCE',
-        note: `實際權重偏離 ${Math.abs(leveragedWeight - currentTarget).toFixed(2)} 個百分點`,
+        note: `實際權重偏離 ${Math.abs(leveragedWeight - currentRuleFloor).toFixed(2)} 個百分點`,
+        policy: 'exact-target',
       };
     }
   });
