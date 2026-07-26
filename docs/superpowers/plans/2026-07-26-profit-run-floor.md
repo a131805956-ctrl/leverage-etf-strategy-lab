@@ -803,6 +803,6 @@ git log --oneline --decorate -10
 
 Re-read every acceptance item in `docs/superpowers/specs/2026-07-26-profit-run-floor-design.md` and map it to an automated test or browser check.
 
-- [ ] **Step 5: Publish**
+- [ ] **Step 5: Hand off for final review and publish**
 
-Push `feat/profit-run-floor`, create a ready PR, wait for CI, merge to `main`, wait for GitHub Pages, verify both public JSON/UI routes with a cache-buster, and create release `v0.2.0`.
+Record all acceptance evidence and leave the branch clean. After the required whole-branch code review passes, the controller will push `feat/profit-run-floor`, create a ready PR, wait for CI, merge to `main`, wait for GitHub Pages, verify both public JSON/UI routes with a cache-buster, and create release `v0.2.0`.
