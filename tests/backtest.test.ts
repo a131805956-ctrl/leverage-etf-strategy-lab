@@ -4,9 +4,9 @@ import { runBacktest } from '../src/core/backtest';
 import type {
   BacktestInput,
   IsoDate,
+  LegacyStrategyConfig,
   MarketSeries,
   PriceBar,
-  StrategyConfig,
 } from '../src/core/types';
 
 const bar = (
@@ -46,7 +46,7 @@ const leveraged: MarketSeries = {
   dividends: [],
 };
 
-const strategy: StrategyConfig = {
+const strategy: LegacyStrategyConfig = {
   id: 'switch',
   name: 'Switch',
   pairId: 'pair',
@@ -66,6 +66,21 @@ const strategy: StrategyConfig = {
     minimumCommission: 0,
   },
 };
+
+const legacySchedulingStrategy = (
+  mode: Extract<LegacyStrategyConfig['rebalance']['mode'], 'daily' | 'weekly'>,
+): LegacyStrategyConfig => ({
+  ...strategy,
+  drawdownRules: [],
+  recoveryRules: [],
+  rebalance: { mode, driftThreshold: 5 },
+});
+
+const seriesForDates = (symbol: string, dates: IsoDate[]): MarketSeries => ({
+  symbol,
+  bars: dates.map((date) => bar(date, 100, 100)),
+  dividends: [],
+});
 
 const input = (
   overrides: Partial<BacktestInput> = {},
@@ -144,6 +159,7 @@ describe('runBacktest', () => {
         endDate: '2024-02-05',
         strategy: {
           ...strategy,
+          allocationPolicy: 'exact-target',
           drawdownRules: [],
           recoveryRules: [],
           rebalance: {
@@ -161,12 +177,84 @@ describe('runBacktest', () => {
     ).toBe('2024-02-05');
   });
 
+  it('normalizes legacy daily scheduling at the backtest entry boundary', () => {
+    const dates: IsoDate[] = ['2024-01-01', '2024-01-02', '2024-01-03'];
+    const result = runBacktest(
+      input({
+        prototype: seriesForDates('BASE', dates),
+        leveraged: seriesForDates('LEV', dates),
+        strategy: legacySchedulingStrategy('daily'),
+      }),
+    );
+
+    expect(result.strategy.rebalance).toMatchObject({
+      mode: 'calendar-interval',
+      intervalDays: 1,
+    });
+    expect(
+      result.trades
+        .filter((trade) => trade.reason === 'SCHEDULED_REBALANCE')
+        .map((trade) => trade.date),
+    ).toEqual(['2024-01-02', '2024-01-03']);
+  });
+
+  it('normalizes legacy weekly scheduling at the backtest entry boundary', () => {
+    const dates: IsoDate[] = ['2024-01-01', '2024-01-05', '2024-01-08'];
+    const result = runBacktest(
+      input({
+        prototype: seriesForDates('BASE', dates),
+        leveraged: seriesForDates('LEV', dates),
+        endDate: '2024-01-08',
+        strategy: legacySchedulingStrategy('weekly'),
+      }),
+    );
+
+    expect(result.strategy.rebalance).toMatchObject({
+      mode: 'calendar-interval',
+      intervalDays: 7,
+    });
+    expect(
+      result.trades
+        .filter((trade) => trade.reason === 'SCHEDULED_REBALANCE')
+        .map((trade) => trade.date),
+    ).toEqual(['2024-01-08']);
+  });
+
+  it('executes one scheduled rebalance after a sparse row crosses multiple buckets', () => {
+    const dates: IsoDate[] = ['2024-01-01', '2024-01-20'];
+    const result = runBacktest(
+      input({
+        prototype: seriesForDates('BASE', dates),
+        leveraged: seriesForDates('LEV', dates),
+        endDate: '2024-01-20',
+        strategy: {
+          ...strategy,
+          allocationPolicy: 'exact-target',
+          drawdownRules: [],
+          recoveryRules: [],
+          rebalance: {
+            mode: 'calendar-interval',
+            intervalDays: 7,
+            driftThreshold: 5,
+          },
+        },
+      }),
+    );
+
+    expect(
+      result.trades.filter((trade) => trade.reason === 'SCHEDULED_REBALANCE'),
+    ).toHaveLength(1);
+    expect(
+      result.trades.find((trade) => trade.reason === 'SCHEDULED_REBALANCE')?.date,
+    ).toBe('2024-01-20');
+  });
+
   it('holds cash dividends until an explicit reinvestment date', () => {
     const withDividend: MarketSeries = {
       ...prototype,
       dividends: [{ date: '2024-01-02', amountPerShare: 10 }],
     };
-    const cashStrategy: StrategyConfig = {
+    const cashStrategy: LegacyStrategyConfig = {
       ...strategy,
       drawdownRules: [],
       dividendMode: 'cash',

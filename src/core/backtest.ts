@@ -11,6 +11,7 @@ import type {
   IsoDate,
   PriceBar,
   RegimeSnapshot,
+  StrategyConfig,
   TradeReason,
   TradeRecord,
 } from './types';
@@ -61,9 +62,9 @@ const alignBars = (input: BacktestInput): AlignedBar[] => {
 const feeForTrade = (
   buyValue: number,
   sellValue: number,
-  input: BacktestInput,
+  strategy: StrategyConfig,
 ): number => {
-  const costs = input.strategy.costs;
+  const costs = strategy.costs;
   if (!costs.enabled) return 0;
   const gross = buyValue + sellValue;
   const commission =
@@ -82,7 +83,7 @@ const rebalance = (
   prototypeOpen: number,
   leveragedOpen: number,
   targetLeveragedWeight: number,
-  input: BacktestInput,
+  strategy: StrategyConfig,
   useCash: number,
 ): { tradedValue: number; cost: number } => {
   const prototypeBefore = position.prototypeShares * prototypeOpen;
@@ -96,7 +97,7 @@ const rebalance = (
   const sellValue =
     Math.max(0, leveragedBefore - targetLeveragedBeforeCost) +
     Math.max(0, prototypeBefore - targetPrototypeBeforeCost);
-  const cost = Math.min(capital, feeForTrade(buyValue, sellValue, input));
+  const cost = Math.min(capital, feeForTrade(buyValue, sellValue, strategy));
   const afterCost = Math.max(0, capital - cost);
   const targetLeveraged = afterCost * (targetLeveragedWeight / 100);
   const targetPrototype = afterCost - targetLeveraged;
@@ -108,10 +109,10 @@ const rebalance = (
 
 const historyState = (
   rows: AlignedBar[],
-  input: BacktestInput,
+  strategy: StrategyConfig,
   startDate: IsoDate,
 ): RegimeSnapshot | undefined => {
-  const totalReturn = input.strategy.dividendMode === 'total-return';
+  const totalReturn = strategy.dividendMode === 'total-return';
   let state: RegimeSnapshot | undefined;
   for (const row of rows.filter((item) => item.date < startDate)) {
     const price = effectivePrice(row.prototype, 'close', totalReturn);
@@ -120,7 +121,7 @@ const historyState = (
           state,
           price,
           row.date,
-          input.strategy.recoveryConfirmationPct,
+          strategy.recoveryConfirmationPct,
         )
       : initialRegime(price, row.date);
   }
@@ -128,7 +129,8 @@ const historyState = (
 };
 
 export function runBacktest(input: BacktestInput): BacktestResult {
-  const errors = validateStrategy(normalizeStrategyConfig(input.strategy));
+  const strategy = normalizeStrategyConfig(input.strategy);
+  const errors = validateStrategy(strategy);
   if (errors.length) throw new Error(errors.join('；'));
   if (!(input.initialCapital > 0)) throw new Error('初始投入金額必須大於零');
 
@@ -140,7 +142,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
 
   const firstRow = selected[0] as AlignedBar;
   const effectiveStartDate = firstRow.date;
-  const totalReturn = input.strategy.dividendMode === 'total-return';
+  const totalReturn = strategy.dividendMode === 'total-return';
   const prototypeDividends = new Map(
     input.prototype.dividends.map((event) => [event.date, event.amountPerShare]),
   );
@@ -151,11 +153,11 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     (input.dividendReinvestments ?? []).map((item) => [item.date, item.target]),
   );
 
-  let regime = historyState(aligned, input, effectiveStartDate);
+  let regime = historyState(aligned, strategy, effectiveStartDate);
   const initialWeight = regime
-    ? (resolveAllocationRule(input.strategy, regime)?.leveragedWeight ??
-      input.strategy.baseLeveragedWeight)
-    : input.strategy.baseLeveragedWeight;
+    ? (resolveAllocationRule(strategy, regime)?.leveragedWeight ??
+      strategy.baseLeveragedWeight)
+    : strategy.baseLeveragedWeight;
   let currentTarget = initialWeight;
   let pending: PendingTrade | undefined = {
     targetLeveragedWeight: initialWeight,
@@ -198,7 +200,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         prototypeOpen,
         leveragedOpen,
         pending.targetLeveragedWeight,
-        input,
+        strategy,
         useCash,
       );
       currentTarget = pending.targetLeveragedWeight;
@@ -227,7 +229,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         prototypeOpen,
         leveragedOpen,
         leveragedWeight,
-        input,
+        strategy,
         position.cash,
       );
       trades.push({
@@ -243,7 +245,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       });
     }
 
-    if (input.strategy.dividendMode === 'cash') {
+    if (strategy.dividendMode === 'cash') {
       position.cash +=
         position.prototypeShares * (prototypeDividends.get(row.date) ?? 0);
       position.cash +=
@@ -266,7 +268,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
           regime,
           prototypeClose,
           row.date,
-          input.strategy.recoveryConfirmationPct,
+          strategy.recoveryConfirmationPct,
         )
       : initialRegime(prototypeClose, row.date);
 
@@ -290,7 +292,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         input.initialCapital * (leveragedClose / firstLeveragedOpen),
     });
 
-    const decision = resolveAllocationRule(input.strategy, regime);
+    const decision = resolveAllocationRule(strategy, regime);
     const next = selected[index + 1];
     if (!next) return;
 
@@ -306,7 +308,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       return;
     }
 
-    const rebalanceConfig = input.strategy.rebalance;
+    const rebalanceConfig = strategy.rebalance;
     const mode = rebalanceConfig.mode;
     if (
       scheduledRebalanceDue(
@@ -324,7 +326,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     } else if (
       mode === 'drift' &&
       Math.abs(leveragedWeight - currentTarget) >=
-        input.strategy.rebalance.driftThreshold
+        strategy.rebalance.driftThreshold
     ) {
       pending = {
         targetLeveragedWeight: currentTarget,
@@ -342,9 +344,9 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     input.annualRiskFreeRate,
   );
   const resultWithoutFingerprint = {
-    id: `${input.strategy.id}-${input.startDate}-${input.endDate}`,
+    id: `${strategy.id}-${input.startDate}-${input.endDate}`,
     pairId: input.pair.id,
-    strategy: input.strategy,
+    strategy,
     startDate: effectiveStartDate,
     endDate: (selected.at(-1) as AlignedBar).date,
     initialCapital: input.initialCapital,

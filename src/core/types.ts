@@ -188,7 +188,7 @@ export interface BacktestResult {
 
 export interface BacktestInput {
   pair: PairDefinition;
-  strategy: StrategyConfig;
+  strategy: StrategyConfig | LegacyStrategyConfig;
   prototype: MarketSeries;
   leveraged: MarketSeries;
   startDate: IsoDate;
