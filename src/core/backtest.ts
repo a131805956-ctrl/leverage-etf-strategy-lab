@@ -115,6 +115,59 @@ const rebalance = (
   return { tradedValue, cost };
 };
 
+const affordableCashPurchase = (
+  cash: number,
+  strategy: StrategyConfig,
+): number => {
+  if (!strategy.costs.enabled) return cash;
+
+  const { commissionRate, slippageRate, minimumCommission } = strategy.costs;
+  if (cash <= minimumCommission) return 0;
+
+  const purchaseWithMinimumCommission =
+    (cash - minimumCommission) / (1 + slippageRate);
+  if (
+    purchaseWithMinimumCommission * commissionRate <= minimumCommission
+  ) {
+    return purchaseWithMinimumCommission;
+  }
+  return cash / (1 + commissionRate + slippageRate);
+};
+
+const investCashTowardFloor = (
+  position: Position,
+  prototypeOpen: number,
+  leveragedOpen: number,
+  targetLeveragedWeight: number,
+  strategy: StrategyConfig,
+): { tradedValue: number; cost: number } => {
+  const cashBefore = position.cash;
+  const tradedValue = affordableCashPurchase(cashBefore, strategy);
+  if (tradedValue <= TRADE_TOLERANCE) {
+    return { tradedValue: 0, cost: 0 };
+  }
+
+  const prototypeBefore = position.prototypeShares * prototypeOpen;
+  const leveragedBefore = position.leveragedShares * leveragedOpen;
+  const totalValue = prototypeBefore + leveragedBefore + cashBefore;
+  const missingLeveragedValue = Math.max(
+    0,
+    totalValue * (targetLeveragedWeight / 100) - leveragedBefore,
+  );
+  const leveragedPurchase = Math.min(tradedValue, missingLeveragedValue);
+  const prototypePurchase = tradedValue - leveragedPurchase;
+  const cost = feeForTrade(tradedValue, 0, strategy);
+  const cashAfter = cashBefore - tradedValue - cost;
+  if (cashAfter < -TRADE_TOLERANCE) {
+    return { tradedValue: 0, cost: 0 };
+  }
+
+  position.prototypeShares += prototypePurchase / prototypeOpen;
+  position.leveragedShares += leveragedPurchase / leveragedOpen;
+  position.cash = Math.max(0, cashAfter);
+  return { tradedValue, cost };
+};
+
 const historyState = (
   rows: AlignedBar[],
   strategy: StrategyConfig,
@@ -247,14 +300,24 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       let leveragedWeight = currentRuleFloor;
       if (reinvestTarget === 'prototype') leveragedWeight = 0;
       if (reinvestTarget === 'leveraged') leveragedWeight = 100;
-      const execution = rebalance(
-        position,
-        prototypeOpen,
-        leveragedOpen,
-        leveragedWeight,
-        strategy,
-        position.cash,
-      );
+      const execution =
+        reinvestTarget === 'target-allocation' &&
+        strategy.allocationPolicy === 'minimum-floor'
+          ? investCashTowardFloor(
+              position,
+              prototypeOpen,
+              leveragedOpen,
+              leveragedWeight,
+              strategy,
+            )
+          : rebalance(
+              position,
+              prototypeOpen,
+              leveragedOpen,
+              leveragedWeight,
+              strategy,
+              position.cash,
+            );
       if (execution.tradedValue > TRADE_TOLERANCE) {
         trades.push({
           date: row.date,

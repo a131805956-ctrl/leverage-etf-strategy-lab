@@ -163,6 +163,56 @@ const alreadyAboveFloorInput = (
   allocationPolicy: StrategyConfig['allocationPolicy'] = 'minimum-floor',
 ): BacktestInput => raisedFloorInput(allocationPolicy, 300);
 
+const costEnabledAboveFloorInput = (): BacktestInput => {
+  const aboveFloor = alreadyAboveFloorInput();
+  return {
+    ...aboveFloor,
+    strategy: profitRunStrategy({
+      highLeveragedWeight: 60,
+      drawdownRules: [{ threshold: 10, leveragedWeight: 80 }],
+      recoveryRules: [],
+      costs: {
+        enabled: true,
+        commissionRate: 0,
+        sellTaxRate: 0.01,
+        slippageRate: 0,
+        minimumCommission: 0,
+      },
+    }),
+  };
+};
+
+const cashAboveFloorInput = (
+  overrides: Partial<StrategyConfig> = {},
+): BacktestInput =>
+  input({
+    strategy: profitRunStrategy({
+      baseLeveragedWeight: 60,
+      highLeveragedWeight: 70,
+      drawdownRules: [],
+      recoveryRules: [],
+      dividendMode: 'cash',
+      ...overrides,
+    }),
+    prototype: {
+      ...pathSeries('BASE', [
+        ['2024-01-01', 100, 100],
+        ['2024-01-02', 100, 100],
+        ['2024-01-03', 100, 100],
+      ]),
+      dividends: [{ date: '2024-01-02', amountPerShare: 25 }],
+    },
+    leveraged: pathSeries('LEV', [
+      ['2024-01-01', 100, 100],
+      ['2024-01-02', 200, 200],
+      ['2024-01-03', 200, 200],
+    ]),
+    endDate: '2024-01-03',
+    dividendReinvestments: [
+      { date: '2024-01-03', target: 'target-allocation' },
+    ],
+  });
+
 const belowRaisedFloorInput = (): BacktestInput =>
   raisedFloorInput('minimum-floor', 50, 90);
 
@@ -315,6 +365,18 @@ describe('runBacktest', () => {
     expect(result.metrics.tradeCount).toBe(1);
     expect(result.metrics.turnover).toBeCloseTo(100);
     expect(result.metrics.totalCosts).toBe(0);
+  });
+
+  it('does not count a no-op rule event as a trade or cost', () => {
+    const result = runBacktest(costEnabledAboveFloorInput());
+
+    expect(
+      result.trades.filter((trade) => trade.reason === 'DRAWDOWN'),
+    ).toHaveLength(0);
+    expect(result.metrics).toMatchObject({
+      tradeCount: 1,
+      totalCosts: 0,
+    });
   });
 
   it('does not mutate cash or charge a hidden fee below trade tolerance', () => {
@@ -615,6 +677,172 @@ describe('runBacktest', () => {
     });
   });
 
+  it('invests target-allocation cash without selling a leveraged winner', () => {
+    const result = runBacktest(cashAboveFloorInput());
+    const reinvestment = result.trades.find(
+      (trade) => trade.reason === 'DIVIDEND_REINVEST',
+    );
+
+    expect(reinvestment).toMatchObject({
+      prototypeValueBefore: 400,
+      leveragedValueBefore: 1_200,
+      cashBefore: 100,
+      tradedValue: 100,
+      cost: 0,
+    });
+    expect(result.points.at(-1)).toMatchObject({
+      prototypeValue: 500,
+      leveragedValue: 1_200,
+      cash: 0,
+    });
+    expect(result.points.at(-1)?.leveragedWeight).toBeGreaterThan(70);
+  });
+
+  it('uses available cash for leveraged shares when the floor is underfunded', () => {
+    const result = runBacktest(
+      input({
+        strategy: profitRunStrategy({
+          baseLeveragedWeight: 60,
+          highLeveragedWeight: 60,
+          drawdownRules: [],
+          recoveryRules: [],
+          dividendMode: 'cash',
+        }),
+        prototype: {
+          ...pathSeries('BASE', [
+            ['2024-01-01', 100, 100],
+            ['2024-01-02', 100, 100],
+            ['2024-01-03', 100, 100],
+          ]),
+          dividends: [{ date: '2024-01-02', amountPerShare: 25 }],
+        },
+        leveraged: pathSeries('LEV', [
+          ['2024-01-01', 100, 100],
+          ['2024-01-02', 100, 50],
+          ['2024-01-03', 50, 50],
+        ]),
+        endDate: '2024-01-03',
+        dividendReinvestments: [
+          { date: '2024-01-03', target: 'target-allocation' },
+        ],
+      }),
+    );
+    const reinvestment = result.trades.find(
+      (trade) => trade.reason === 'DIVIDEND_REINVEST',
+    );
+
+    expect(reinvestment).toMatchObject({
+      prototypeValueBefore: 400,
+      leveragedValueBefore: 300,
+      cashBefore: 100,
+      tradedValue: 100,
+    });
+    expect(result.points.at(-1)).toMatchObject({
+      prototypeValue: 400,
+      leveragedValue: 400,
+      cash: 0,
+      leveragedWeight: 50,
+    });
+  });
+
+  it('records actual cash purchases and cost for floor-aware reinvestment', () => {
+    const result = runBacktest(
+      cashAboveFloorInput({
+        costs: {
+          enabled: true,
+          commissionRate: 0,
+          sellTaxRate: 0,
+          slippageRate: 0,
+          minimumCommission: 5,
+        },
+      }),
+    );
+    const reinvestment = result.trades.find(
+      (trade) => trade.reason === 'DIVIDEND_REINVEST',
+    );
+
+    expect(reinvestment).toMatchObject({
+      cashBefore: 99.5,
+      tradedValue: 94.5,
+      cost: 5,
+    });
+    expect(result.points.at(-1)).toMatchObject({
+      prototypeValue: 492.5,
+      leveragedValue: 1_194,
+      cash: 0,
+      value: 1_686.5,
+    });
+    expect(result.metrics).toMatchObject({
+      tradeCount: 2,
+      turnover: 109.45,
+      totalCosts: 10,
+    });
+  });
+
+  it('leaves cash untouched when costs make a reinvestment impossible', () => {
+    const shared: Partial<BacktestInput> = {
+      strategy: profitRunStrategy({
+        baseLeveragedWeight: 0,
+        highLeveragedWeight: 0,
+        drawdownRules: [],
+        recoveryRules: [],
+        dividendMode: 'cash',
+        costs: {
+          enabled: true,
+          commissionRate: 0,
+          sellTaxRate: 0,
+          slippageRate: 0,
+          minimumCommission: 1,
+        },
+      }),
+      prototype: {
+        ...seriesForDates('BASE', [
+          '2024-01-01',
+          '2024-01-02',
+          '2024-01-03',
+        ]),
+        dividends: [{ date: '2024-01-02', amountPerShare: 0.05 }],
+      },
+      leveraged: seriesForDates('LEV', [
+        '2024-01-01',
+        '2024-01-02',
+        '2024-01-03',
+      ]),
+      endDate: '2024-01-03',
+    };
+    const baseline = runBacktest(input(shared));
+    const result = runBacktest(
+      input({
+        ...shared,
+        dividendReinvestments: [
+          { date: '2024-01-03', target: 'target-allocation' },
+        ],
+      }),
+    );
+
+    expect(
+      result.trades.filter(
+        (trade) => trade.reason === 'DIVIDEND_REINVEST',
+      ),
+    ).toHaveLength(0);
+    expect(result.points.at(-1)).toEqual(baseline.points.at(-1));
+    expect(result.points.at(-1)?.cash).toBeGreaterThan(0);
+    expect(result.metrics).toMatchObject({
+      tradeCount: baseline.metrics.tradeCount,
+      turnover: baseline.metrics.turnover,
+      totalCosts: baseline.metrics.totalCosts,
+      finalValue: baseline.metrics.finalValue,
+    });
+  });
+
+  it('keeps exact-target dividend allocation behavior for legacy strategies', () => {
+    const result = runBacktest(
+      cashAboveFloorInput({ allocationPolicy: 'exact-target' }),
+    );
+
+    expect(result.points.at(-1)?.leveragedWeight).toBeCloseTo(70);
+  });
+
   it('does not record or mutate a sub-tolerance dividend reinvestment', () => {
     const dates: IsoDate[] = ['2024-01-01', '2024-01-02', '2024-01-03'];
     const tinyDividendPrototype: MarketSeries = {
@@ -675,10 +903,20 @@ describe('runBacktest', () => {
     });
   });
 
-  it('keeps non-dividend capital fully invested', () => {
-    const result = runBacktest(input());
-    for (const point of result.points) {
-      expect(point.prototypeWeight + point.leveragedWeight).toBeCloseTo(100);
-    }
-  });
+  it.each(['price-only', 'total-return'] as const)(
+    'keeps %s non-dividend capital fully invested',
+    (dividendMode) => {
+      const result = runBacktest(
+        input({
+          strategy: {
+            ...strategy,
+            dividendMode,
+          },
+        }),
+      );
+      for (const point of result.points) {
+        expect(point.prototypeWeight + point.leveragedWeight).toBeCloseTo(100);
+      }
+    },
+  );
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { calculateMetrics, findDrawdownEpisodes } from '../src/core/metrics';
-import type { DailyPoint, IsoDate } from '../src/core/types';
+import type { DailyPoint, IsoDate, TradeRecord } from '../src/core/types';
 
 const point = (date: IsoDate, value: number): DailyPoint => ({
   date,
@@ -39,6 +39,26 @@ describe('calculateMetrics', () => {
     expect(metrics.averageExposure).toBe(100);
     expect(metrics.tradeCount).toBe(0);
     expect(metrics.totalCosts).toBe(0);
+  });
+
+  it('counts one dividend reinvestment from its actual purchase and cost', () => {
+    const reinvestment: TradeRecord = {
+      date: '2024-01-04',
+      reason: 'DIVIDEND_REINVEST',
+      prototypeValueBefore: 400,
+      leveragedValueBefore: 1_200,
+      cashBefore: 100,
+      targetLeveragedWeight: 70,
+      tradedValue: 95,
+      cost: 5,
+      note: 'Dividend reinvestment',
+    };
+
+    const metrics = calculateMetrics(points, [reinvestment], 100, 0);
+
+    expect(metrics.tradeCount).toBe(1);
+    expect(metrics.turnover).toBe(95);
+    expect(metrics.totalCosts).toBe(5);
   });
 });
 
