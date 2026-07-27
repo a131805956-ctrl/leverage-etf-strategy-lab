@@ -8,6 +8,24 @@ import type {
 
 const day = (date: IsoDate): number => Date.parse(`${date}T00:00:00Z`);
 
+const isReductionTrade = (trade: TradeRecord): boolean => {
+  if (trade.reason === 'RECOVERY') {
+    // New records carry share deltas. A rebound that has to buy the floor is
+    // not a reduction; legacy records without deltas remain compatible.
+    return (
+      trade.leveragedSharesSold === undefined ||
+      trade.leveragedSharesSold > 1e-9
+    );
+  }
+  // Returning to the normal target now happens on NEW_HIGH. It is only a
+  // reduction event when the execution actually sells leveraged shares; a
+  // new-high signal below the floor must not close the pink episode.
+  return (
+    trade.reason === 'NEW_HIGH' &&
+    (trade.leveragedSharesSold ?? 0) > 1e-9
+  );
+};
+
 const stageForPoint = (
   point: DailyPoint,
   trigger: ExposureEventStage['trigger'],
@@ -28,8 +46,9 @@ const stageForPoint = (
  * Derive chartable exposure episodes from the immutable backtest output.
  *
  * An episode starts at the last observed high before an add-on (DRAWDOWN)
- * trade and ends at the first subsequent reduction (RECOVERY) trade. If no
- * reduction occurs before the sample ends, the final chart point is used.
+ * trade and ends at the first subsequent reduction (RECOVERY or a NEW_HIGH
+ * normalization sale) trade. If no reduction occurs before the sample ends,
+ * the final chart point is used.
  */
 export function buildExposureEvents(
   points: DailyPoint[],
@@ -60,7 +79,9 @@ export function buildExposureEvents(
 
     const reductionIndex = sortedTrades.findIndex(
       (candidate, index) =>
-        index > tradeIndex && candidate.date >= addTrade.date && candidate.reason === 'RECOVERY',
+        index > tradeIndex &&
+        candidate.date >= addTrade.date &&
+        isReductionTrade(candidate),
     );
     const reductionTrade = reductionIndex >= 0 ? sortedTrades[reductionIndex] : undefined;
     const endIndex = reductionTrade
@@ -86,7 +107,7 @@ export function buildExposureEvents(
     );
     const addTrades = episodeTrades.filter((candidate) => candidate.reason === 'DRAWDOWN');
     const reductionTrades = episodeTrades.filter(
-      (candidate) => candidate.reason === 'RECOVERY',
+      isReductionTrade,
     );
     const stages = points
       .slice(startIndex, endIndex + 1)

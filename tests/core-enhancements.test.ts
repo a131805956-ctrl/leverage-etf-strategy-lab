@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { earliestCommonDate, runBacktest } from '../src/core/backtest';
 import { buildExposureEvents } from '../src/core/events';
 import { resolveAllocationRule } from '../src/core/rules';
+import { normalizeStrategyConfig } from '../src/core/strategyConfig';
 import { createOptimizationCandidate } from '../src/optimization/gridSearch';
 import type {
   DailyPoint,
@@ -158,6 +159,48 @@ describe('core enhancements', () => {
     expect(events[0]?.stages.length).toBeGreaterThan(0);
   });
 
+  it('ends an exposure event when a new-high normalization sells leveraged shares', () => {
+    const points: DailyPoint[] = [
+      { date: '2024-02-01', value: 100, prototypeValue: 40, leveragedValue: 60, cash: 0, prototypeWeight: 40, leveragedWeight: 60, targetLeveragedWeight: 60, nominalExposure: 160, drawdown: 0, regime: 'AT_HIGH', benchmarkPrototype: 100, benchmarkLeveraged: 100 },
+      { date: '2024-02-02', value: 95, prototypeValue: 38, leveragedValue: 57, cash: 0, prototypeWeight: 40, leveragedWeight: 60, targetLeveragedWeight: 80, nominalExposure: 160, drawdown: 5, regime: 'DECLINE', benchmarkPrototype: 95, benchmarkLeveraged: 90 },
+      { date: '2024-02-03', value: 110, prototypeValue: 44, leveragedValue: 66, cash: 0, prototypeWeight: 40, leveragedWeight: 60, targetLeveragedWeight: 60, nominalExposure: 160, drawdown: 0, regime: 'AT_HIGH', benchmarkPrototype: 110, benchmarkLeveraged: 120 },
+    ];
+    const trades: TradeRecord[] = [
+      { date: '2024-02-02', reason: 'DRAWDOWN', prototypeValueBefore: 40, leveragedValueBefore: 60, cashBefore: 0, targetLeveragedWeight: 80, tradedValue: 20, cost: 0, note: '', leveragedSharesBought: 1, prototypeSharesBought: 0 },
+      { date: '2024-02-03', reason: 'NEW_HIGH', prototypeValueBefore: 38, leveragedValueBefore: 76, cashBefore: 0, targetLeveragedWeight: 60, tradedValue: 12, cost: 0, note: '', leveragedSharesSold: 1, prototypeSharesBought: 1 },
+    ];
+    const events = buildExposureEvents(points, trades);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      endDate: '2024-02-03',
+      reductionTrades: [trades[1]],
+    });
+  });
+
+  it('does not reduce on a decline in new-high mode; reduction waits for normalizing NEW_HIGH', () => {
+    const state = {
+      regime: 'DECLINE' as const,
+      runningHigh: 100,
+      runningHighDate: '2024-01-01' as IsoDate,
+      trough: 94,
+      troughDate: '2024-01-02' as IsoDate,
+      drawdownPct: 6,
+      reboundPct: 0,
+      distanceToHighPct: 6,
+    };
+    expect(
+      resolveAllocationRule(
+        {
+          ...strategy,
+          reductionReference: 'new-high-decline',
+          drawdownRules: [],
+          reductionRules: [{ threshold: 5, leveragedWeight: 40 }],
+        },
+        state,
+      ),
+    ).toBeUndefined();
+  });
+
   it('quick optimization candidates use normal leverage for both base and high and disable rebalance', () => {
     const candidate = createOptimizationCandidate(strategy, {
       normal: 75,
@@ -166,6 +209,60 @@ describe('core enhancements', () => {
     });
     expect(candidate.baseLeveragedWeight).toBe(75);
     expect(candidate.highLeveragedWeight).toBe(75);
+    expect(candidate.normalLeveragedWeight).toBe(75);
     expect(candidate.rebalance.mode).toBe('none');
+  });
+
+  it('normal leverage is the single source for both initial and new-high targets', () => {
+    const normalized = normalizeStrategyConfig({
+      ...strategy,
+      normalLeveragedWeight: 62,
+      baseLeveragedWeight: 40,
+      highLeveragedWeight: 95,
+    });
+
+    expect(normalized.baseLeveragedWeight).toBe(62);
+    expect(normalized.highLeveragedWeight).toBe(62);
+  });
+
+  it('sells leveraged excess when a decline recovers to a new high under minimum-floor mode', () => {
+    const dates = [
+      '2024-01-01',
+      '2024-01-02',
+      '2024-01-03',
+      '2024-01-04',
+      '2024-01-05',
+    ] as IsoDate[];
+    const result = runBacktest(
+      input({
+        strategy: {
+          ...strategy,
+          normalLeveragedWeight: 60,
+          allocationPolicy: 'minimum-floor',
+          baseLeveragedWeight: 60,
+          highLeveragedWeight: 60,
+          drawdownRules: [{ threshold: 10, leveragedWeight: 80 }],
+          reductionRules: [],
+          recoveryRules: [],
+        },
+        prototype: {
+          symbol: 'BASE',
+          bars: dates.map((date, index) => bar(date, [100, 90, 80, 101, 102][index] ?? 102)),
+          dividends: [],
+        },
+        leveraged: {
+          symbol: 'LEV',
+          bars: dates.map((date, index) => bar(date, [100, 180, 200, 250, 250][index] ?? 250)),
+          dividends: [],
+        },
+        endDate: '2024-01-05',
+      }),
+    );
+    const newHighTrade = result.trades.find(
+      (trade) => trade.reason === 'NEW_HIGH' && trade.date === '2024-01-05',
+    );
+    expect(newHighTrade).toBeDefined();
+    expect(newHighTrade?.targetLeveragedWeight).toBe(60);
+    expect(newHighTrade?.leveragedSharesSold).toBeGreaterThan(0);
   });
 });

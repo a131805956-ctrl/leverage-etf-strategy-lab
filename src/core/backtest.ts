@@ -569,11 +569,17 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         policy: 'exact-target',
       };
     } else if (decision && ruleChanged) {
+      const reductionPolicy =
+        (decision.reason === 'NEW_HIGH' &&
+          strategy.normalLeveragedWeight !== undefined) ||
+        (decision.reason === 'RECOVERY' && strategy.reductionRules?.length)
+          ? 'exact-target'
+          : strategy.allocationPolicy;
       pending = {
         targetLeveragedWeight: decision.leveragedWeight,
         reason: decision.reason,
         note: `${regime.regime}：距前高 ${regime.distanceToHighPct.toFixed(2)}%`,
-        policy: strategy.allocationPolicy,
+        policy: reductionPolicy,
       };
     }
   });

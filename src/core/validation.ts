@@ -22,6 +22,12 @@ export function validateStrategy(strategy: StrategyConfig): string[] {
   if (!inPercentRange(strategy.highLeveragedWeight)) {
     errors.push('創新高槓桿 ETF 權重必須介於 0% 到 100%');
   }
+  if (
+    strategy.normalLeveragedWeight !== undefined &&
+    !inPercentRange(strategy.normalLeveragedWeight)
+  ) {
+    errors.push('Normal leverage must be between 0% and 100%');
+  }
   if (hasDuplicates(strategy.drawdownRules.map((rule) => rule.threshold))) {
     errors.push('回撤門檻不可重複');
   }

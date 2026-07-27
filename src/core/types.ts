@@ -84,6 +84,8 @@ export interface StrategyConfig {
   name: string;
   pairId: string;
   allocationPolicy: AllocationPolicy;
+  /** Preferred single normal-leverage field for new scenarios. */
+  normalLeveragedWeight?: number;
   baseLeveragedWeight: number;
   highLeveragedWeight: number;
   drawdownRules: DrawdownRule[];

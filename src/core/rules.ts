@@ -71,24 +71,17 @@ export function resolveAllocationRule(
       };
     }
 
-    // A high-decline reduction is allowed as a fallback only when no
-    // drawdown add-on step applies. This preserves the "at least this much
-    // leveraged exposure" floor semantics of add-on rules.
-    if (strategy.reductionReference === 'new-high-decline') {
-      const reduction = deepestReductionRule(strategy, state.distanceToHighPct);
-      if (reduction) {
-        return {
-          ruleKey: `reduction:${reduction.threshold}`,
-          leveragedWeight: reduction.leveragedWeight,
-          reason: 'RECOVERY',
-        };
-      }
-    }
+    // In new-high mode, a decline only evaluates the add-on ladder. Any
+    // leveraged excess is normalized at the next NEW_HIGH exact-target event;
+    // never sell into the drawdown itself.
     return undefined;
   }
 
   const reference = strategy.reductionReference ?? 'prototype-rebound';
-  if (strategy.reductionRules?.length) {
+  if (
+    strategy.reductionRules?.length &&
+    reference !== 'new-high-decline'
+  ) {
     const reduction = deepestReductionRule(
       strategy,
       reductionMetric(reference, state),
@@ -100,6 +93,8 @@ export function resolveAllocationRule(
       reason: 'RECOVERY',
     };
   }
+
+  if (reference === 'new-high-decline') return undefined;
 
   // Legacy recoveryRules are distance-to-high rules. They remain readable by
   // old saved scenarios and are not mutated while resolving a decision.
