@@ -56,7 +56,8 @@ export function resolveAllocationRule(
   if (state.regime === 'AT_HIGH') {
     return {
       ruleKey: 'new-high',
-      leveragedWeight: strategy.highLeveragedWeight,
+      leveragedWeight:
+        strategy.normalLeveragedWeight ?? strategy.highLeveragedWeight,
       reason: 'NEW_HIGH',
     };
   }

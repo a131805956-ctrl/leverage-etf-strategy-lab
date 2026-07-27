@@ -223,6 +223,21 @@ describe('core enhancements', () => {
 
     expect(normalized.baseLeveragedWeight).toBe(62);
     expect(normalized.highLeveragedWeight).toBe(62);
+    expect(
+      resolveAllocationRule(
+        { ...strategy, normalLeveragedWeight: 62, highLeveragedWeight: 95 },
+        {
+          regime: 'AT_HIGH',
+          runningHigh: 100,
+          runningHighDate: '2024-01-01',
+          trough: 100,
+          troughDate: '2024-01-01',
+          drawdownPct: 0,
+          reboundPct: 0,
+          distanceToHighPct: 0,
+        },
+      )?.leveragedWeight,
+    ).toBe(62);
   });
 
   it('sells leveraged excess when a decline recovers to a new high under minimum-floor mode', () => {
@@ -264,5 +279,18 @@ describe('core enhancements', () => {
     expect(newHighTrade).toBeDefined();
     expect(newHighTrade?.targetLeveragedWeight).toBe(60);
     expect(newHighTrade?.leveragedSharesSold).toBeGreaterThan(0);
+  });
+
+  it('closes the pink exposure episode on a new-high reduction trade', () => {
+    const points: DailyPoint[] = [
+      { date: '2024-01-01', value: 100, prototypeValue: 40, leveragedValue: 60, cash: 0, prototypeWeight: 40, leveragedWeight: 60, targetLeveragedWeight: 60, nominalExposure: 160, drawdown: 0, regime: 'AT_HIGH', benchmarkPrototype: 100, benchmarkLeveraged: 100 },
+      { date: '2024-01-02', value: 90, prototypeValue: 36, leveragedValue: 54, cash: 0, prototypeWeight: 40, leveragedWeight: 60, targetLeveragedWeight: 80, nominalExposure: 160, drawdown: 10, regime: 'DECLINE', benchmarkPrototype: 90, benchmarkLeveraged: 80 },
+      { date: '2024-01-03', value: 105, prototypeValue: 42, leveragedValue: 63, cash: 0, prototypeWeight: 40, leveragedWeight: 60, targetLeveragedWeight: 60, nominalExposure: 160, drawdown: 0, regime: 'AT_HIGH', benchmarkPrototype: 105, benchmarkLeveraged: 110 },
+    ];
+    const add: TradeRecord = { date: '2024-01-02', reason: 'DRAWDOWN', prototypeValueBefore: 40, leveragedValueBefore: 60, cashBefore: 0, targetLeveragedWeight: 80, tradedValue: 20, cost: 0, note: '' };
+    const reduce: TradeRecord = { date: '2024-01-03', reason: 'NEW_HIGH', prototypeValueBefore: 38, leveragedValueBefore: 72, cashBefore: 0, targetLeveragedWeight: 60, tradedValue: 20, cost: 0, note: '', leveragedSharesSold: 1 };
+    const events = buildExposureEvents(points, [add, reduce]);
+    expect(events[0]?.reductionTrades).toEqual([reduce]);
+    expect(events[0]?.endDate).toBe('2024-01-03');
   });
 });
