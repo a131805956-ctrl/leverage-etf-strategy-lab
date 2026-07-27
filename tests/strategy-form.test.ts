@@ -102,7 +102,7 @@ describe('reduction form state', () => {
   it('shows trough confirmation only for prototype or leveraged rebound references', () => {
     expect(resolveReductionFormState('new-high-decline')).toEqual({
       showConfirmation: false,
-      helperText: '由創新高回撤百分比觸發減倉',
+      helperText: '創高後立即回歸正常槓桿比例',
     });
     expect(resolveReductionFormState('prototype-rebound')).toMatchObject({
       showConfirmation: true,
@@ -125,6 +125,30 @@ describe('strategy drawer rule controls', () => {
     expect(appSource).not.toMatch(/TradingView|tradingview-logo/i);
     expect(appSource).not.toContain('id="data-health"');
     expect(appSource).not.toContain('id="exposure-track"');
+  });
+
+  it('keeps one normal leverage control with an accurate explanation', () => {
+    expect((appSource.match(/id="base-weight"/g) ?? []).length).toBe(1);
+    expect(appSource).not.toContain('id="high-weight"');
+    expect(appSource).toContain('創新高持有正常比例');
+    expect(appSource).toContain('只有回撤／反彈規則改變');
+    expect(appSource).toContain('新高或反彈減碼會把多餘槓桿轉回原型');
+  });
+
+  it('hides the rebound reduction ladder while new-high normalization is selected', () => {
+    expect(appSource).toContain('id="reduction-ladder-controls"');
+    expect(appSource).toContain("reference === 'new-high-decline'");
+  });
+
+  it('lets the chart and overlays pass vertical touch scrolling through', () => {
+    expect(cssSource).toMatch(/\.chart-host\s*\{[^}]*touch-action:\s*pan-y;/s);
+    expect(cssSource).toMatch(/\.chart-event-layer\s*\{[^}]*touch-action:\s*pan-y;/s);
+  });
+
+  it('does not trap page scrolling inside the chart or strategy panel', () => {
+    expect(cssSource).toMatch(/\.main\s*\{[^}]*overflow:\s*visible;/s);
+    expect(cssSource).toMatch(/\.drawer\s*\{[^}]*overscroll-behavior:\s*auto;/s);
+    expect(cssSource).toMatch(/\.drawer\s*\{[^}]*overflow:\s*visible;/s);
   });
 
   it('wires exposure event markers to a large detail modal', () => {
@@ -194,7 +218,7 @@ describe('strategy drawer accessibility markup', () => {
 
   it('keeps drawer scrolling contained and toast feedback live', () => {
     expect(cssSource).toMatch(
-      /\.drawer\s*\{[^}]*overscroll-behavior:\s*contain;/s,
+      /\.drawer\s*\{[^}]*overscroll-behavior:\s*auto;/s,
     );
     expect(appSource).toContain(
       "toast.setAttribute('role', danger ? 'alert' : 'status');",

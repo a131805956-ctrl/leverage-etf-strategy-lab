@@ -28,7 +28,7 @@ export function resolveReductionFormState(
   }
   return {
     showConfirmation: false,
-    helperText: '由創新高回撤百分比觸發減倉',
+    helperText: '創高後立即回歸正常槓桿比例',
   };
 }
 

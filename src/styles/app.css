@@ -53,7 +53,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 .rail button span { display: block; font: 600 18px var(--font-data); margin-bottom: 4px; }
 .rail button.active { background: var(--paper); color: var(--teal); box-shadow: var(--shadow); }
-.main { min-width: 0; padding: 18px 20px 34px; }
+.main { min-width: 0; padding: 18px 20px 34px; overflow: visible; }
 .view { display: none; }
 .view.active { display: block; animation: appear .18s ease-out; }
 @keyframes appear { from { opacity: .4; transform: translateY(3px); } }
@@ -92,34 +92,37 @@ h3 { font: 650 13px var(--font-display); }
 .chart-tools { margin-left: auto; display: flex; gap: 4px; }
 .chart-tools button { border: 0; background: var(--paper-2); color: var(--ink-2); border-radius: 6px; padding: 5px 8px; cursor: pointer; font-size: 10px; }
 .chart-tools button.active { background: var(--ink); color: var(--paper); }
-.chart-host { height: 420px; position: relative; }
+.chart-host { height: 560px; position: relative; touch-action: pan-y; }
+.chart-host canvas { touch-action: pan-y; }
 .chart-tooltip {
-  position: absolute; display: none; z-index: 5; pointer-events: none; min-width: 156px;
+  position: absolute; display: none; z-index: 20; pointer-events: none; min-width: 156px;
   background: color-mix(in srgb, var(--paper) 94%, transparent); border: 1px solid var(--line);
-  border-radius: 8px; padding: 9px 11px; box-shadow: var(--shadow); font: 10px/1.55 var(--font-data);
-  max-width: min(300px, calc(100% - 20px));
+  border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow); font: 10px/1.6 var(--font-data);
+  width: min(330px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto;
 }
 .chart-tooltip-title { margin: -2px 0 5px; color: var(--ink); font-weight: 750; font-size: 11px; }
 .chart-tooltip div:not(.chart-tooltip-title) { display: flex; justify-content: space-between; gap: 12px; }
 .chart-tooltip span { color: var(--ink-2); }
 .chart-tooltip b { color: var(--ink); font-weight: 700; text-align: right; }
 .chart-exposure-overlay {
-  position: absolute; z-index: 2; left: 0; right: 0; bottom: 24px; height: 9px;
+  position: absolute; z-index: 2; left: 0; right: 0; bottom: 42px; height: 22px;
   overflow: hidden; pointer-events: none; border-radius: 2px;
   background: color-mix(in srgb, var(--paper-2) 80%, transparent);
 }
 .chart-exposure-segment { position: absolute; top: 0; bottom: 0; min-width: 1px; opacity: .78; }
-.chart-event-layer { position: absolute; inset: 0 0 24px; z-index: 10; pointer-events: none; overflow: hidden; }
+.chart-event-layer { position: absolute; inset: 0 0 42px; z-index: 10; pointer-events: none; overflow: hidden; touch-action: pan-y; }
 .chart-event-band {
   position: absolute; top: 0; bottom: 0; min-width: 2px;
-  background: color-mix(in srgb, #ed5b9a 18%, transparent);
-  border-left: 1px solid color-mix(in srgb, #ed5b9a 42%, transparent);
-  border-right: 1px solid color-mix(in srgb, #ed5b9a 42%, transparent);
+  background: color-mix(in srgb, #ed5b9a 28%, transparent);
+  border-left: 2px dashed color-mix(in srgb, #d83c83 70%, transparent);
+  border-right: 2px dashed color-mix(in srgb, #d83c83 70%, transparent);
+  box-shadow: inset 0 0 18px color-mix(in srgb, #ed5b9a 12%, transparent);
 }
+.chart-event-band-open { opacity: .72; }
 .chart-event-marker {
   position: absolute; top: 3px; z-index: 3; pointer-events: auto; width: 14px; height: 14px;
   border: 0; padding: 0; color: #dc4d8f; background: transparent; cursor: pointer;
-  font: 700 10px/10px var(--font-data); letter-spacing: -2px;
+  font: 700 11px/10px var(--font-data); letter-spacing: -2px; touch-action: manipulation;
   text-shadow: 0 1px 0 var(--paper);
 }
 .chart-event-marker:hover { color: #a92c68; transform: scale(1.2); }
@@ -147,8 +150,8 @@ td.data { font-family: var(--font-data); text-align: right; }
 #trade-table td div { line-height: 1.6; }
 .empty { padding: 28px; text-align: center; color: var(--ink-3); }
 .drawer {
-  position: sticky; top: 58px; height: calc(100vh - 58px); overflow: auto;
-  overscroll-behavior: contain;
+  position: sticky; top: 58px; height: auto; overflow: visible;
+  overscroll-behavior: auto; touch-action: pan-y;
   border-left: 1px solid var(--line); background: var(--paper); padding: 17px;
 }
 .drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
@@ -227,7 +230,7 @@ td.data { font-family: var(--font-data); text-align: right; }
 .danger { color: var(--red); }
 @media (max-width: 1180px) {
   .workspace { grid-template-columns: 68px minmax(0, 1fr); }
-  .drawer { position: fixed; z-index: 30; top: 58px; right: 0; width: 340px; display: none; box-shadow: var(--shadow); }
+  .drawer { position: fixed; z-index: 30; top: 58px; right: 0; width: 340px; height: calc(100vh - 58px); overflow: auto; display: none; box-shadow: var(--shadow); }
   .drawer.open { display: block; }
   .mobile-config { display: inline-flex; }
   .metric-grid { grid-template-columns: repeat(3, 1fr); }
@@ -246,14 +249,14 @@ td.data { font-family: var(--font-data); text-align: right; }
   }
   .rail button { margin: 0; padding: 4px; }
   .rail button span { font-size: 14px; margin: 0; }
-  .main { width: 100vw; max-width: 100vw; padding: 14px 10px 24px; overflow: hidden; }
+  .main { width: 100vw; max-width: 100vw; padding: 14px 10px 24px; overflow: visible; }
   .page-head { align-items: flex-start; flex-direction: column; }
   h1 { font-size: 22px; }
   .metric-grid { width: 100%; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metric { min-width: 0; overflow: hidden; }
   .metric-value { font-size: 17px; }
   .metric:nth-child(n+5) { display: none; }
-  .chart-host { height: 340px; }
+  .chart-host { height: 420px; }
   .legend { display: none; }
   .lower-grid, .portfolio-builder { grid-template-columns: 1fr; }
   .portfolio-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
