@@ -90,6 +90,7 @@ export class StrategyLabApp {
   private chart?: WorkbenchChart;
   private saved: SavedScenario[] = [];
   private optimizerCandidates = new Map<string, BacktestResult>();
+  private lastEventTrigger?: HTMLElement;
   private repository: ScenarioRepository;
 
   constructor(private readonly root: HTMLElement) {
@@ -206,7 +207,7 @@ export class StrategyLabApp {
               <div class="field"><label for="capital">單次投入金額（TWD）</label><input id="capital" name="capital" type="number" value="1000000" min="1000" step="10000" autocomplete="off"></div>
               <div class="field"><label for="base-weight">正常槓桿比 <span class="label-en">Normal leverage</span></label><input id="base-weight" name="base-weight" type="number" value="70" min="0" max="100" autocomplete="off"><p class="field-help">創新高持有正常比例；只有回撤／反彈規則改變。</p></div>
               <div class="field"><label for="allocation-policy">權重執行方式</label><select id="allocation-policy" name="allocation-policy" autocomplete="off"><option value="minimum-floor" selected>讓利潤奔騰／最低持倉底線</option><option value="exact-target">精確目標比例</option></select></div>
-              <div class="mode-note" id="floor-mode-note">回撤加碼是至少持有的槓桿底線；新高或反彈減碼會把多餘槓桿轉回原型，回到正常比例。</div>
+              <div class="mode-note" id="floor-mode-note">回撤加碼是至少持有的槓桿底線；回撤加碼後，新高或反彈減碼會把多餘槓桿轉回原型，回到正常比例。</div>
             </div>
             <div class="form-section">
               <div class="rule-section-heading"><h3>下跌加碼階梯 <span class="label-en">Downside adds</span></h3><span class="rule-actions"><button class="icon-button" type="button" data-action="remove-rule" data-rule-kind="drawdown" aria-label="移除下跌加碼條件">−</button><button class="icon-button" type="button" data-action="add-rule" data-rule-kind="drawdown" aria-label="新增下跌加碼條件">＋</button></span></div>
@@ -528,6 +529,10 @@ export class StrategyLabApp {
   }
 
   private openEventModal(event: ChartEvent): void {
+    this.lastEventTrigger =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : undefined;
     const modal = this.get('event-detail-modal');
     const title = this.get('event-detail-title');
     const content = this.get('event-detail-content');
@@ -541,10 +546,13 @@ export class StrategyLabApp {
       .join('');
     content.innerHTML = `<div class="event-summary"><div><span>起點 Peak</span><strong>${event.peakDate ?? event.startDate}</strong></div><div><span>區間 Duration</span><strong>${event.startDate} – ${event.endDate}</strong></div><div><span>加倉階段 Adds</span><strong>${event.addTrades?.length ?? 0}</strong></div><div><span>減碼階段 Reductions</span><strong>${event.reductionTrades?.length ?? 0}</strong></div></div><h3>完整操作紀錄 / Trade log</h3><div class="table-wrap event-table"><table><thead><tr><th>日期</th><th>原因</th><th>目標槓桿</th><th>成交額</th><th>交易後現值</th><th>說明</th></tr></thead><tbody>${tradeRows || '<tr><td colspan="6">無操作紀錄</td></tr>'}</tbody></table></div><h3>各階段資金與曝險 / Stages</h3><div class="table-wrap event-table"><table><thead><tr><th>日期</th><th>觸發</th><th>資金</th><th>權重</th><th>名目曝險</th></tr></thead><tbody>${stageRows || '<tr><td colspan="5">無階段資料</td></tr>'}</tbody></table></div>`;
     modal.removeAttribute('hidden');
+    this.get('close-event-modal').focus();
   }
 
   private closeEventModal(): void {
     this.get('event-detail-modal').setAttribute('hidden', '');
+    this.lastEventTrigger?.focus();
+    this.lastEventTrigger = undefined;
   }
 
   private async saveCurrent(): Promise<void> {
