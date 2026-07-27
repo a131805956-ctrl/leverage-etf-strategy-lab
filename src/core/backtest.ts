@@ -35,7 +35,7 @@ interface PendingTrade {
   targetLeveragedWeight: number;
   reason: TradeReason;
   note: string;
-  policy: 'exact-target' | 'minimum-floor';
+  policy: 'exact-target' | 'minimum-floor' | 'reduce-excess';
 }
 
 interface Execution {
@@ -367,8 +367,10 @@ export function runBacktest(input: BacktestInput): BacktestResult {
           ? Math.abs(
               actualLeveragedWeight - pending.targetLeveragedWeight,
             ) > TRADE_TOLERANCE
-          : actualLeveragedWeight + TRADE_TOLERANCE <
-            pending.targetLeveragedWeight);
+          : pending.policy === 'reduce-excess'
+            ? actualLeveragedWeight > pending.targetLeveragedWeight + TRADE_TOLERANCE
+            : actualLeveragedWeight + TRADE_TOLERANCE <
+              pending.targetLeveragedWeight);
 
       if (shouldTrade) {
         const execution = rebalance(
@@ -575,7 +577,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       const reductionPolicy =
         decision.reason === 'NEW_HIGH' ||
         (decision.reason === 'RECOVERY' && strategy.reductionRules?.length)
-          ? 'exact-target'
+          ? 'reduce-excess'
           : strategy.allocationPolicy;
       const closesAddOnEpisode =
         decision.reason !== 'NEW_HIGH' ||
