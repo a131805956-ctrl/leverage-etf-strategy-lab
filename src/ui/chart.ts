@@ -146,6 +146,33 @@ export function clampTooltipPosition(
 }
 
 /**
+ * Clip a DOM overlay span to the currently visible time-scale plot.
+ * Lightweight Charts may return negative or over-width coordinates for dates
+ * outside the visible range.  Clipping both edges prevents those spans from
+ * collapsing into a stack at the left edge when the chart is zoomed.
+ */
+export function clipOverlaySpan(
+  rawLeft: number,
+  rawRight: number,
+  plotWidth: number,
+): { left: number; width: number } | undefined {
+  if (
+    !Number.isFinite(rawLeft) ||
+    !Number.isFinite(rawRight) ||
+    !Number.isFinite(plotWidth) ||
+    plotWidth <= 0
+  ) {
+    return undefined;
+  }
+  const start = Math.min(rawLeft, rawRight);
+  const end = Math.max(rawLeft, rawRight);
+  const left = Math.max(0, start);
+  const right = Math.min(plotWidth, end);
+  if (right <= 0 || left >= plotWidth || right <= left) return undefined;
+  return { left, width: Math.max(1, right - left + 0.5) };
+}
+
+/**
  * Keep all changing state in the hover card. This deliberately includes
  * both human-facing Chinese and stable English labels for AI/export users.
  */
@@ -287,7 +314,33 @@ export function createWorkbenchChart(
     title: '槓桿 ETF Leveraged',
     priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
   });
-  const series: Array<ISeriesApi<'Line'>> = [strategy, prototype, leveraged];
+  // Plot nominal exposure on its own hidden scale so the track follows the
+  // time axis and price movement instead of being pinned to the chart footer.
+  // The DOM rail below remains as a compact colour legend for the same data.
+  const nominalExposure = chart.addLineSeries({
+    color: css('--orange'),
+    lineWidth: 2,
+    lineStyle: LineStyle.Dotted,
+    title: '? Nominal exposure',
+    priceScaleId: 'nominal-exposure',
+    lastValueVisible: false,
+    priceLineVisible: false,
+    priceFormat: {
+      type: 'custom',
+      minMove: 0.1,
+      formatter: (value: number) => `${value.toFixed(0)}%`,
+    },
+  });
+  chart.priceScale('nominal-exposure').applyOptions({
+    visible: false,
+    scaleMargins: { top: 0.12, bottom: 0.12 },
+  });
+  const series: Array<ISeriesApi<'Line'>> = [
+    strategy,
+    prototype,
+    leveraged,
+    nominalExposure,
+  ];
   const rail = document.createElement('div');
   rail.className = 'chart-exposure-overlay';
   rail.setAttribute('aria-label', '名目曝險軌道 Nominal exposure rail');
@@ -331,11 +384,13 @@ export function createWorkbenchChart(
       if (left === null) return;
       const next = segments[index + 1];
       const right = next ? coordinate(next.date) : chart.timeScale().width();
+      const clipped = clipOverlaySpan(left, right ?? left + 2, plotWidth);
+      if (!clipped) return;
       const span = document.createElement('span');
       span.className = 'chart-exposure-segment';
       span.title = `${segment.date} · ${segment.exposure.toFixed(1)}% nominal exposure`;
-      span.style.left = `${Math.max(0, left)}px`;
-      span.style.width = `${Math.max(1, (right ?? left + 2) - left + 0.5)}px`;
+      span.style.left = `${clipped.left}px`;
+      span.style.width = `${clipped.width}px`;
       span.style.background = segment.color;
       rail.append(span);
     });
@@ -345,16 +400,22 @@ export function createWorkbenchChart(
       const start = coordinate(event.startDate);
       const end = coordinate(event.endDate);
       if (start === null && end === null) return;
-      const left = Math.max(0, start ?? 0);
-      const right = Math.min(chart.timeScale().width(), end ?? chart.timeScale().width());
+      const clipped = clipOverlaySpan(
+        start ?? 0,
+        end ?? plotWidth,
+        plotWidth,
+      );
+      if (!clipped) return;
       const band = document.createElement('div');
       band.className = `chart-event-band${isClosedExposureEvent(event) ? '' : ' chart-event-band-open'}`;
-      band.style.left = `${Math.min(left, right)}px`;
-      band.style.width = `${Math.max(2, Math.abs(right - left))}px`;
+      band.style.left = `${clipped.left}px`;
+      band.style.width = `${Math.max(2, clipped.width)}px`;
       band.title = event.title ?? `事件 ${event.startDate} — ${event.endDate}`;
       eventLayer.append(band);
       const markerX = coordinate(event.peakDate ?? event.startDate);
-      if (markerX === null) return;
+      // Do not clamp off-range markers to x=0; during a zoom this would stack
+      // every historical marker on the left edge of the plot.
+      if (markerX === null || markerX < 0 || markerX > plotWidth) return;
       const marker = document.createElement('button');
       marker.type = 'button';
       marker.className = 'chart-event-marker';
@@ -419,6 +480,12 @@ export function createWorkbenchChart(
       strategy.setData(toData('value'));
       prototype.setData(toData('benchmarkPrototype'));
       leveraged.setData(toData('benchmarkLeveraged'));
+      nominalExposure.setData(
+        result.points.map((point) => ({
+          time: point.date,
+          value: point.nominalExposure,
+        })),
+      );
       const important = result.trades
         .slice(1)
         .filter(

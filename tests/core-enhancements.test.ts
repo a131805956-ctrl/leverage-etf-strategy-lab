@@ -301,6 +301,46 @@ describe('core enhancements', () => {
     expect(result.trades.filter((trade) => trade.reason === 'NEW_HIGH')).toHaveLength(0);
   });
 
+  it('never buys leveraged shares when a recovery reduction target is above actual weight', () => {
+    const dates = [
+      '2024-06-01',
+      '2024-06-02',
+      '2024-06-03',
+      '2024-06-04',
+      '2024-06-05',
+    ] as IsoDate[];
+    const result = runBacktest(input({
+      strategy: {
+        ...strategy,
+        normalLeveragedWeight: 60,
+        baseLeveragedWeight: 60,
+        highLeveragedWeight: 60,
+        allocationPolicy: 'minimum-floor',
+        drawdownRules: [{ threshold: 10, leveragedWeight: 80 }],
+        reductionReference: 'prototype-rebound',
+        reductionRules: [{ threshold: 5, leveragedWeight: 50 }],
+        recoveryRules: [],
+        recoveryConfirmationPct: 0,
+      },
+      prototype: {
+        symbol: 'BASE',
+        bars: dates.map((date, index) => bar(date, [100, 90, 80, 88, 88][index] ?? 88)),
+        dividends: [],
+      },
+      leveraged: {
+        symbol: 'LEV',
+        bars: dates.map((date, index) => bar(date, [100, 80, 40, 45, 45][index] ?? 45)),
+        dividends: [],
+      },
+      endDate: dates.at(-1),
+    }));
+    expect(
+      result.trades
+        .filter((trade) => trade.reason === 'RECOVERY')
+        .every((trade) => (trade.leveragedSharesBought ?? 0) === 0),
+    ).toBe(true);
+  });
+
   it('closes the pink exposure episode on a new-high reduction trade', () => {
     const points: DailyPoint[] = [
       { date: '2024-01-01', value: 100, prototypeValue: 40, leveragedValue: 60, cash: 0, prototypeWeight: 40, leveragedWeight: 60, targetLeveragedWeight: 60, nominalExposure: 160, drawdown: 0, regime: 'AT_HIGH', benchmarkPrototype: 100, benchmarkLeveraged: 100 },

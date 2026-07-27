@@ -5,6 +5,7 @@ import type { DailyPoint } from '../src/core/types';
 import {
   buildExposureRailSegments,
   clampTooltipPosition,
+  clipOverlaySpan,
   formatChartPointTooltip,
   isClosedExposureEvent,
 } from '../src/ui/chart';
@@ -91,9 +92,22 @@ describe('chart data presentation helpers', () => {
     expect(css).toMatch(/\.chart-exposure-overlay\s*\{[^}]*height:\s*22px;/s);
   });
 
+  it('plots nominal exposure on a synchronized hidden scale', () => {
+    const source = readFileSync(new URL('../src/ui/chart.ts', import.meta.url), 'utf8');
+    expect(source).toContain("priceScaleId: 'nominal-exposure'");
+    expect(source).toContain('nominalExposure.setData');
+  });
+
   it('keeps the tooltip within the chart even when the crosshair is at an edge', () => {
     expect(clampTooltipPosition(8, 4, 800, 500, 320, 220)).toEqual({ left: 10, top: 10 });
     expect(clampTooltipPosition(790, 496, 800, 500, 320, 220)).toEqual({ left: 470, top: 270 });
+  });
+
+  it('clips rail spans to the visible plot instead of stacking off-range bars', () => {
+    expect(clipOverlaySpan(-120, 83, 770)).toEqual({ left: 0, width: 83.5 });
+    expect(clipOverlaySpan(700, 900, 770)).toEqual({ left: 700, width: 70.5 });
+    expect(clipOverlaySpan(-200, -1, 770)).toBeUndefined();
+    expect(clipOverlaySpan(771, 900, 770)).toBeUndefined();
   });
 
   it('does not fill an unfinished add-on episode across the whole chart', () => {
