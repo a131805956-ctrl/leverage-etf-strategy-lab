@@ -67,6 +67,18 @@ export interface RecoveryRule {
   leveragedWeight: number;
 }
 
+/** The reference used to reduce leveraged exposure after a drawdown. */
+export type ReductionReference =
+  | 'new-high-decline'
+  | 'prototype-rebound'
+  | 'leveraged-rebound';
+
+export interface ReductionRule {
+  /** Percentage threshold for the selected reduction reference. */
+  threshold: number;
+  leveragedWeight: number;
+}
+
 export interface StrategyConfig {
   id: string;
   name: string;
@@ -75,7 +87,12 @@ export interface StrategyConfig {
   baseLeveragedWeight: number;
   highLeveragedWeight: number;
   drawdownRules: DrawdownRule[];
+  /** New reduction model. Optional to preserve persisted legacy scenarios. */
+  reductionReference?: ReductionReference;
+  reductionRules?: ReductionRule[];
+  /** @deprecated Use reductionRules/reductionReference. */
   recoveryRules: RecoveryRule[];
+  /** Used only by prototype/leveraged rebound reduction modes. */
   recoveryConfirmationPct: number;
   rebalance: {
     mode: StrategyRebalanceMode;
@@ -106,6 +123,10 @@ export interface RegimeSnapshot {
   drawdownPct: number;
   reboundPct: number;
   distanceToHighPct: number;
+  /** Alias for the prototype rebound percentage, explicit for UI/AI consumers. */
+  prototypeReboundPct?: number;
+  /** Rebound percentage measured on the leveraged ETF, when available. */
+  leveragedReboundPct?: number;
 }
 
 export type TradeReason =
@@ -127,6 +148,20 @@ export interface TradeRecord {
   tradedValue: number;
   cost: number;
   note: string;
+  /** Shares bought/sold at the execution price for each constituent. */
+  prototypeSharesBought?: number;
+  prototypeSharesSold?: number;
+  leveragedSharesBought?: number;
+  leveragedSharesSold?: number;
+  prototypeSharesAfter?: number;
+  leveragedSharesAfter?: number;
+  prototypePrice?: number;
+  leveragedPrice?: number;
+  /** Mark-to-market values immediately after the trade is executed. */
+  prototypeValueAfter?: number;
+  leveragedValueAfter?: number;
+  cashAfter?: number;
+  totalValueAfter?: number;
 }
 
 export interface DailyPoint {
@@ -143,6 +178,19 @@ export interface DailyPoint {
   regime: MarketRegime;
   benchmarkPrototype: number;
   benchmarkLeveraged: number;
+  /** Position snapshot for chart hover/AI inspection. */
+  prototypeShares?: number;
+  leveragedShares?: number;
+  prototypePrice?: number;
+  leveragedPrice?: number;
+  runningHigh?: number;
+  runningHighDate?: IsoDate;
+  trough?: number;
+  troughDate?: IsoDate;
+  reboundPct?: number;
+  leveragedReboundPct?: number;
+  distanceToHighPct?: number;
+  activeRuleKey?: string;
 }
 
 export interface DrawdownEpisode {
@@ -182,8 +230,35 @@ export interface BacktestResult {
   points: DailyPoint[];
   trades: TradeRecord[];
   drawdowns: DrawdownEpisode[];
+  /** Pink chart bands representing one add-on episode through its first reduction. */
+  exposureEvents?: ExposureEvent[];
   metrics: PerformanceMetrics;
   fingerprint: string;
+}
+
+export interface ExposureEventStage {
+  date: IsoDate;
+  trigger: TradeReason | 'MARK';
+  capital: number;
+  prototypeValue: number;
+  leveragedValue: number;
+  cash: number;
+  prototypeWeight: number;
+  leveragedWeight: number;
+  targetLeveragedWeight: number;
+  nominalExposure: number;
+}
+
+export interface ExposureEvent {
+  id: string;
+  startDate: IsoDate;
+  endDate: IsoDate;
+  peakDate: IsoDate;
+  startIndex: number;
+  endIndex: number;
+  addTrades: TradeRecord[];
+  reductionTrades: TradeRecord[];
+  stages: ExposureEventStage[];
 }
 
 export interface BacktestInput {

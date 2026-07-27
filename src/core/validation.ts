@@ -48,6 +48,30 @@ export function validateStrategy(strategy: StrategyConfig): string[] {
   ) {
     errors.push('反彈規則的門檻與權重必須介於有效範圍');
   }
+  if (
+    strategy.reductionRules &&
+    hasDuplicates(strategy.reductionRules.map((rule) => rule.threshold))
+  ) {
+    errors.push('Reduction thresholds must be unique');
+  }
+  if (
+    strategy.reductionRules?.some(
+      (rule) =>
+        rule.threshold <= 0 ||
+        rule.threshold > 100 ||
+        !inPercentRange(rule.leveragedWeight),
+    )
+  ) {
+    errors.push('Reduction thresholds and weights must be within range');
+  }
+  if (
+    strategy.reductionReference &&
+    !['new-high-decline', 'prototype-rebound', 'leveraged-rebound'].includes(
+      strategy.reductionReference,
+    )
+  ) {
+    errors.push('Unknown reduction reference');
+  }
   if (strategy.execution !== 'next-open') {
     errors.push('正式回測只允許下一交易日開盤成交');
   }

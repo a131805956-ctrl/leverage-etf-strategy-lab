@@ -14,6 +14,7 @@ export function initialRegime(price: number, date: IsoDate): RegimeSnapshot {
     drawdownPct: 0,
     reboundPct: 0,
     distanceToHighPct: 0,
+    prototypeReboundPct: 0,
   };
 }
 
@@ -52,5 +53,6 @@ export function advanceRegime(
     drawdownPct,
     reboundPct,
     distanceToHighPct,
+    prototypeReboundPct: reboundPct,
   };
 }

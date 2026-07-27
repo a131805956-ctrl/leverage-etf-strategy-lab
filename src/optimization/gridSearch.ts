@@ -22,13 +22,22 @@ export function createOptimizationCandidate(
   activeStrategy: StrategyConfig,
   parameters: Record<string, number>,
 ): StrategyConfig {
+  const quickSearch = Object.prototype.hasOwnProperty.call(parameters, 'normal');
+  const normal = parameters.normal ?? parameters.base ?? 60;
   return {
     ...activeStrategy,
-    rebalance: { ...activeStrategy.rebalance },
+    rebalance: quickSearch
+      ? { mode: 'none', driftThreshold: activeStrategy.rebalance.driftThreshold }
+      : { ...activeStrategy.rebalance },
     costs: { ...activeStrategy.costs },
     recoveryRules: activeStrategy.recoveryRules.map((rule) => ({ ...rule })),
-    baseLeveragedWeight: parameters.base ?? 60,
-    highLeveragedWeight: parameters.high ?? 70,
+    ...(activeStrategy.reductionRules
+      ? { reductionRules: activeStrategy.reductionRules.map((rule) => ({ ...rule })) }
+      : {}),
+    baseLeveragedWeight: normal,
+    highLeveragedWeight: quickSearch
+      ? normal
+      : parameters.high ?? 70,
     drawdownRules: [
       { threshold: 10, leveragedWeight: parameters.dd10 ?? 80 },
       { threshold: 20, leveragedWeight: parameters.dd20 ?? 90 },

@@ -1,4 +1,5 @@
 import { fingerprint } from './fingerprint';
+import { buildExposureEvents } from './events';
 import { calculateMetrics, findDrawdownEpisodes } from './metrics';
 import { advanceRegime, initialRegime } from './regime';
 import { scheduledRebalanceDue } from './rebalance';
@@ -9,6 +10,7 @@ import type {
   BacktestResult,
   DailyPoint,
   IsoDate,
+  MarketSeries,
   PriceBar,
   RegimeSnapshot,
   StrategyConfig,
@@ -34,6 +36,17 @@ interface PendingTrade {
   reason: TradeReason;
   note: string;
   policy: 'exact-target' | 'minimum-floor';
+}
+
+interface Execution {
+  tradedValue: number;
+  cost: number;
+  prototypeSharesBought: number;
+  prototypeSharesSold: number;
+  leveragedSharesBought: number;
+  leveragedSharesSold: number;
+  prototypeSharesAfter: number;
+  leveragedSharesAfter: number;
 }
 
 const TRADE_TOLERANCE = 1e-9;
@@ -88,7 +101,9 @@ const rebalance = (
   targetLeveragedWeight: number,
   strategy: StrategyConfig,
   useCash: number,
-): { tradedValue: number; cost: number } => {
+): Execution => {
+  const prototypeSharesBefore = position.prototypeShares;
+  const leveragedSharesBefore = position.leveragedShares;
   const prototypeBefore = position.prototypeShares * prototypeOpen;
   const leveragedBefore = position.leveragedShares * leveragedOpen;
   const capital = prototypeBefore + leveragedBefore + useCash;
@@ -102,7 +117,16 @@ const rebalance = (
     Math.max(0, prototypeBefore - targetPrototypeBeforeCost);
   const tradedValue = buyValue + sellValue;
   if (tradedValue <= TRADE_TOLERANCE) {
-    return { tradedValue: 0, cost: 0 };
+    return {
+      tradedValue: 0,
+      cost: 0,
+      prototypeSharesBought: 0,
+      prototypeSharesSold: 0,
+      leveragedSharesBought: 0,
+      leveragedSharesSold: 0,
+      prototypeSharesAfter: prototypeSharesBefore,
+      leveragedSharesAfter: leveragedSharesBefore,
+    };
   }
 
   const cost = Math.min(capital, feeForTrade(buyValue, sellValue, strategy));
@@ -112,7 +136,16 @@ const rebalance = (
   position.prototypeShares = targetPrototype / prototypeOpen;
   position.leveragedShares = targetLeveraged / leveragedOpen;
   position.cash -= useCash;
-  return { tradedValue, cost };
+  return {
+    tradedValue,
+    cost,
+    prototypeSharesBought: Math.max(0, position.prototypeShares - prototypeSharesBefore),
+    prototypeSharesSold: Math.max(0, prototypeSharesBefore - position.prototypeShares),
+    leveragedSharesBought: Math.max(0, position.leveragedShares - leveragedSharesBefore),
+    leveragedSharesSold: Math.max(0, leveragedSharesBefore - position.leveragedShares),
+    prototypeSharesAfter: position.prototypeShares,
+    leveragedSharesAfter: position.leveragedShares,
+  };
 };
 
 const affordableCashPurchase = (
@@ -140,11 +173,22 @@ const investCashTowardFloor = (
   leveragedOpen: number,
   targetLeveragedWeight: number,
   strategy: StrategyConfig,
-): { tradedValue: number; cost: number } => {
+): Execution => {
+  const prototypeSharesBefore = position.prototypeShares;
+  const leveragedSharesBefore = position.leveragedShares;
   const cashBefore = position.cash;
   const tradedValue = affordableCashPurchase(cashBefore, strategy);
   if (tradedValue <= TRADE_TOLERANCE) {
-    return { tradedValue: 0, cost: 0 };
+    return {
+      tradedValue: 0,
+      cost: 0,
+      prototypeSharesBought: 0,
+      prototypeSharesSold: 0,
+      leveragedSharesBought: 0,
+      leveragedSharesSold: 0,
+      prototypeSharesAfter: prototypeSharesBefore,
+      leveragedSharesAfter: leveragedSharesBefore,
+    };
   }
 
   const prototypeBefore = position.prototypeShares * prototypeOpen;
@@ -159,14 +203,44 @@ const investCashTowardFloor = (
   const cost = feeForTrade(tradedValue, 0, strategy);
   const cashAfter = cashBefore - tradedValue - cost;
   if (cashAfter < -TRADE_TOLERANCE) {
-    return { tradedValue: 0, cost: 0 };
+    return {
+      tradedValue: 0,
+      cost: 0,
+      prototypeSharesBought: 0,
+      prototypeSharesSold: 0,
+      leveragedSharesBought: 0,
+      leveragedSharesSold: 0,
+      prototypeSharesAfter: prototypeSharesBefore,
+      leveragedSharesAfter: leveragedSharesBefore,
+    };
   }
 
   position.prototypeShares += prototypePurchase / prototypeOpen;
   position.leveragedShares += leveragedPurchase / leveragedOpen;
   position.cash = Math.max(0, cashAfter);
-  return { tradedValue, cost };
+  return {
+    tradedValue,
+    cost,
+    prototypeSharesBought: Math.max(0, position.prototypeShares - prototypeSharesBefore),
+    prototypeSharesSold: Math.max(0, prototypeSharesBefore - position.prototypeShares),
+    leveragedSharesBought: Math.max(0, position.leveragedShares - leveragedSharesBefore),
+    leveragedSharesSold: Math.max(0, leveragedSharesBefore - position.leveragedShares),
+    prototypeSharesAfter: position.prototypeShares,
+    leveragedSharesAfter: position.leveragedShares,
+  };
 };
+
+/** Return the first trading date shared by both ETF series. */
+export function earliestCommonDate(
+  prototype: MarketSeries,
+  leveraged: MarketSeries,
+): IsoDate | undefined {
+  const leveragedDates = new Set(leveraged.bars.map((bar) => bar.date));
+  return prototype.bars
+    .map((bar) => bar.date)
+    .filter((date) => leveragedDates.has(date))
+    .sort((a, b) => a.localeCompare(b))[0];
+}
 
 const historyState = (
   rows: AlignedBar[],
@@ -175,6 +249,10 @@ const historyState = (
 ): RegimeSnapshot | undefined => {
   const totalReturn = strategy.dividendMode === 'total-return';
   let state: RegimeSnapshot | undefined;
+  const confirmation =
+    strategy.reductionReference === 'new-high-decline'
+      ? 0
+      : strategy.recoveryConfirmationPct;
   for (const row of rows.filter((item) => item.date < startDate)) {
     const price = effectivePrice(row.prototype, 'close', totalReturn);
     state = state
@@ -182,7 +260,7 @@ const historyState = (
           state,
           price,
           row.date,
-          strategy.recoveryConfirmationPct,
+          confirmation,
         )
       : initialRegime(price, row.date);
   }
@@ -231,6 +309,19 @@ export function runBacktest(input: BacktestInput): BacktestResult {
   const points: DailyPoint[] = [];
   const trades: TradeRecord[] = [];
   let runningPeak = input.initialCapital;
+  let leveragedRunningHigh = 0;
+  let leveragedTrough = 0;
+  // Keep the leveraged ETF's independent trough/high history when the user
+  // starts a simulation in the middle of the available sample.
+  for (const row of aligned.filter((item) => item.date < effectiveStartDate)) {
+    const price = effectivePrice(row.leveraged, 'close', totalReturn);
+    if (leveragedRunningHigh <= 0 || price >= leveragedRunningHigh) {
+      leveragedRunningHigh = price;
+      leveragedTrough = price;
+    } else if (leveragedTrough <= 0 || price < leveragedTrough) {
+      leveragedTrough = price;
+    }
+  }
 
   const firstPrototypeOpen = effectivePrice(
     firstRow.prototype,
@@ -248,6 +339,17 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     const leveragedOpen = effectivePrice(row.leveraged, 'open', totalReturn);
     const prototypeClose = effectivePrice(row.prototype, 'close', totalReturn);
     const leveragedClose = effectivePrice(row.leveraged, 'close', totalReturn);
+
+    if (leveragedRunningHigh <= 0 || leveragedClose >= leveragedRunningHigh) {
+      leveragedRunningHigh = leveragedClose;
+      leveragedTrough = leveragedClose;
+    } else if (leveragedTrough <= 0 || leveragedClose < leveragedTrough) {
+      leveragedTrough = leveragedClose;
+    }
+    const leveragedReboundPct =
+      leveragedTrough > 0
+        ? Number(((leveragedClose / leveragedTrough - 1) * 100).toFixed(10))
+        : 0;
 
     if (pending) {
       const prototypeBefore = position.prototypeShares * prototypeOpen;
@@ -286,6 +388,21 @@ export function runBacktest(input: BacktestInput): BacktestResult {
             tradedValue: execution.tradedValue,
             cost: execution.cost,
             note: pending.note,
+            prototypeSharesBought: execution.prototypeSharesBought,
+            prototypeSharesSold: execution.prototypeSharesSold,
+            leveragedSharesBought: execution.leveragedSharesBought,
+            leveragedSharesSold: execution.leveragedSharesSold,
+            prototypeSharesAfter: execution.prototypeSharesAfter,
+            leveragedSharesAfter: execution.leveragedSharesAfter,
+            prototypePrice: prototypeOpen,
+            leveragedPrice: leveragedOpen,
+            prototypeValueAfter: position.prototypeShares * prototypeOpen,
+            leveragedValueAfter: position.leveragedShares * leveragedOpen,
+            cashAfter: position.cash,
+            totalValueAfter:
+              position.prototypeShares * prototypeOpen +
+              position.leveragedShares * leveragedOpen +
+              position.cash,
           });
         }
       }
@@ -329,6 +446,21 @@ export function runBacktest(input: BacktestInput): BacktestResult {
           tradedValue: execution.tradedValue,
           cost: execution.cost,
           note: `待投入股息投入 ${reinvestTarget}`,
+          prototypeSharesBought: execution.prototypeSharesBought,
+          prototypeSharesSold: execution.prototypeSharesSold,
+          leveragedSharesBought: execution.leveragedSharesBought,
+          leveragedSharesSold: execution.leveragedSharesSold,
+          prototypeSharesAfter: execution.prototypeSharesAfter,
+          leveragedSharesAfter: execution.leveragedSharesAfter,
+          prototypePrice: prototypeOpen,
+          leveragedPrice: leveragedOpen,
+          prototypeValueAfter: position.prototypeShares * prototypeOpen,
+          leveragedValueAfter: position.leveragedShares * leveragedOpen,
+          cashAfter: position.cash,
+          totalValueAfter:
+            position.prototypeShares * prototypeOpen +
+            position.leveragedShares * leveragedOpen +
+            position.cash,
         });
       }
     }
@@ -356,9 +488,16 @@ export function runBacktest(input: BacktestInput): BacktestResult {
           regime,
           prototypeClose,
           row.date,
-          strategy.recoveryConfirmationPct,
+          strategy.reductionReference === 'new-high-decline'
+            ? 0
+            : strategy.recoveryConfirmationPct,
         )
       : initialRegime(prototypeClose, row.date);
+    regime = {
+      ...regime,
+      prototypeReboundPct: regime.reboundPct,
+      leveragedReboundPct,
+    };
 
     const decision = resolveAllocationRule(strategy, regime);
     const ruleChanged = decision?.ruleKey !== activeRuleKey;
@@ -386,6 +525,18 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         input.initialCapital * (prototypeClose / firstPrototypeOpen),
       benchmarkLeveraged:
         input.initialCapital * (leveragedClose / firstLeveragedOpen),
+      prototypeShares: position.prototypeShares,
+      leveragedShares: position.leveragedShares,
+      prototypePrice: prototypeClose,
+      leveragedPrice: leveragedClose,
+      runningHigh: regime.runningHigh,
+      runningHighDate: regime.runningHighDate,
+      trough: regime.trough,
+      troughDate: regime.troughDate,
+      reboundPct: regime.reboundPct,
+      leveragedReboundPct: regime.leveragedReboundPct,
+      distanceToHighPct: regime.distanceToHighPct,
+      activeRuleKey,
     });
 
     if (!next) return;
@@ -444,6 +595,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     points,
     trades,
     drawdowns,
+    exposureEvents: buildExposureEvents(points, trades),
     metrics,
   };
 
