@@ -573,12 +573,15 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       };
     } else if (decision && ruleChanged) {
       const reductionPolicy =
-        decision.reason === 'NEW_HIGH' || decision.reason === 'RECOVERY'
+        decision.reason === 'NEW_HIGH' ||
+        (decision.reason === 'RECOVERY' && strategy.reductionRules?.length)
           ? 'exact-target'
           : strategy.allocationPolicy;
       const closesAddOnEpisode =
         decision.reason !== 'NEW_HIGH' ||
-        previousRuleFloor > normalLeveragedTarget + TRADE_TOLERANCE;
+        (strategy.normalLeveragedWeight !== undefined
+          ? Math.abs(previousRuleFloor - normalLeveragedTarget) > TRADE_TOLERANCE
+          : previousRuleFloor > normalLeveragedTarget + TRADE_TOLERANCE);
       if (closesAddOnEpisode) {
         pending = {
           targetLeveragedWeight: decision.leveragedWeight,

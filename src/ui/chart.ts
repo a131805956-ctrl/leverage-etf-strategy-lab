@@ -324,7 +324,7 @@ export function createWorkbenchChart(
     rail.replaceChildren();
     const segments = buildExposureRailSegments(
       current.points,
-      Math.max(72, Math.min(120, Math.floor(plotWidth / 7))),
+      Math.max(36, Math.min(120, Math.floor(plotWidth / 7))),
     );
     segments.forEach((segment, index) => {
       const left = coordinate(segment.date);

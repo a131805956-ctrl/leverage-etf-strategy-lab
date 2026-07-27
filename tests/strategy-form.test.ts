@@ -157,6 +157,12 @@ describe('strategy drawer rule controls', () => {
     expect(appSource).toContain('addTrades');
     expect(appSource).toContain('reductionTrades');
   });
+
+  it('moves focus into the event modal and restores it on close', () => {
+    expect(appSource).toContain('lastEventTrigger');
+    expect(appSource).toContain("this.get('close-event-modal').focus()");
+    expect(appSource).toContain('this.lastEventTrigger?.focus()');
+  });
 });
 
 describe('strategy drawer accessibility markup', () => {
