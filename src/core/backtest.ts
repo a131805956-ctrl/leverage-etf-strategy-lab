@@ -575,10 +575,12 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       };
     } else if (decision && ruleChanged) {
       const reductionPolicy =
-        decision.reason === 'NEW_HIGH' ||
-        (decision.reason === 'RECOVERY' && strategy.reductionRules?.length)
-          ? 'reduce-excess'
-          : strategy.allocationPolicy;
+        strategy.allocationPolicy === 'exact-target'
+          ? 'exact-target'
+          : decision.reason === 'NEW_HIGH' ||
+              (decision.reason === 'RECOVERY' && strategy.reductionRules?.length)
+            ? 'reduce-excess'
+            : strategy.allocationPolicy;
       const closesAddOnEpisode =
         decision.reason !== 'NEW_HIGH' ||
         (strategy.normalLeveragedWeight !== undefined
