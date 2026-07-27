@@ -294,6 +294,8 @@ export function runBacktest(input: BacktestInput): BacktestResult {
 
   let regime = historyState(aligned, strategy, effectiveStartDate);
   let currentRuleFloor = strategy.baseLeveragedWeight;
+  const normalLeveragedTarget =
+    strategy.normalLeveragedWeight ?? strategy.highLeveragedWeight;
   let activeRuleKey: string | undefined;
   let pending: PendingTrade | undefined = {
     targetLeveragedWeight: strategy.baseLeveragedWeight,
@@ -501,6 +503,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
 
     const decision = resolveAllocationRule(strategy, regime);
     const ruleChanged = decision?.ruleKey !== activeRuleKey;
+    const previousRuleFloor = currentRuleFloor;
     activeRuleKey = decision?.ruleKey;
     if (decision && ruleChanged) {
       currentRuleFloor = decision.leveragedWeight;
@@ -570,17 +573,20 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       };
     } else if (decision && ruleChanged) {
       const reductionPolicy =
-        (decision.reason === 'NEW_HIGH' &&
-          strategy.normalLeveragedWeight !== undefined) ||
-        (decision.reason === 'RECOVERY' && strategy.reductionRules?.length)
+        decision.reason === 'NEW_HIGH' || decision.reason === 'RECOVERY'
           ? 'exact-target'
           : strategy.allocationPolicy;
-      pending = {
-        targetLeveragedWeight: decision.leveragedWeight,
-        reason: decision.reason,
-        note: `${regime.regime}：距前高 ${regime.distanceToHighPct.toFixed(2)}%`,
-        policy: reductionPolicy,
-      };
+      const closesAddOnEpisode =
+        decision.reason !== 'NEW_HIGH' ||
+        previousRuleFloor > normalLeveragedTarget + TRADE_TOLERANCE;
+      if (closesAddOnEpisode) {
+        pending = {
+          targetLeveragedWeight: decision.leveragedWeight,
+          reason: decision.reason,
+          note: `${regime.regime}：距前高 ${regime.distanceToHighPct.toFixed(2)}%`,
+          policy: reductionPolicy,
+        };
+      }
     }
   });
 

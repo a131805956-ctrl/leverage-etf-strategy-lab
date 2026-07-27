@@ -281,6 +281,26 @@ describe('core enhancements', () => {
     expect(newHighTrade?.leveragedSharesSold).toBeGreaterThan(0);
   });
 
+  it('lets leveraged outperformance run until a drawdown add-on episode exists', () => {
+    const dates = ['2024-05-01', '2024-05-02', '2024-05-03', '2024-05-04'] as IsoDate[];
+    const result = runBacktest(input({
+      strategy: {
+        ...strategy,
+        allocationPolicy: 'minimum-floor',
+        baseLeveragedWeight: 60,
+        highLeveragedWeight: 60,
+        drawdownRules: [],
+        reductionRules: [],
+        recoveryRules: [],
+      },
+      prototype: { symbol: 'BASE', bars: dates.map((date, index) => bar(date, [100, 101, 102, 103][index] ?? 103)), dividends: [] },
+      leveraged: { symbol: 'LEV', bars: dates.map((date, index) => bar(date, [100, 110, 120, 130][index] ?? 130)), dividends: [] },
+      startDate: dates[0],
+      endDate: dates.at(-1),
+    }));
+    expect(result.trades.filter((trade) => trade.reason === 'NEW_HIGH')).toHaveLength(0);
+  });
+
   it('closes the pink exposure episode on a new-high reduction trade', () => {
     const points: DailyPoint[] = [
       { date: '2024-01-01', value: 100, prototypeValue: 40, leveragedValue: 60, cash: 0, prototypeWeight: 40, leveragedWeight: 60, targetLeveragedWeight: 60, nominalExposure: 160, drawdown: 0, regime: 'AT_HIGH', benchmarkPrototype: 100, benchmarkLeveraged: 100 },
