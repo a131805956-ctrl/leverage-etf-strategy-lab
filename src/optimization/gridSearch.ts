@@ -30,6 +30,7 @@ export function createOptimizationCandidate(
       ? { mode: 'none', driftThreshold: activeStrategy.rebalance.driftThreshold }
       : { ...activeStrategy.rebalance },
     costs: { ...activeStrategy.costs },
+    ...(quickSearch ? { normalLeveragedWeight: normal } : {}),
     recoveryRules: activeStrategy.recoveryRules.map((rule) => ({ ...rule })),
     ...(activeStrategy.reductionRules
       ? { reductionRules: activeStrategy.reductionRules.map((rule) => ({ ...rule })) }

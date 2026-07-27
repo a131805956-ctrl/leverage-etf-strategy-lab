@@ -73,7 +73,13 @@ export interface WorkbenchChart {
 
 /** An episode is closed only after the first reduction trade. */
 export function isClosedExposureEvent(event: ChartEvent): boolean {
-  return (event.reductionTrades?.length ?? 0) > 0;
+  return (
+    (event.reductionTrades?.length ?? 0) > 0 ||
+    (event.reductions?.length ?? 0) > 0 ||
+    (event.stages?.some((stage) =>
+      ['RECOVERY', 'REDUCTION', 'DELEVERAGE'].includes(stage.trigger ?? stage.reason ?? ''),
+    ) ?? false)
+  );
 }
 
 const css = (name: string): string =>
@@ -97,8 +103,20 @@ const escapeHtml = (value: string): string =>
   );
 
 /** Pure helper used both by the chart and its non-DOM tests. */
-export function buildExposureRailSegments(points: DailyPoint[]): ExposureRailSegment[] {
-  return points.map((point) => {
+export function buildExposureRailSegments(
+  points: DailyPoint[],
+  maxSegments = 120,
+): ExposureRailSegment[] {
+  if (points.length === 0) return [];
+  const limit = Math.max(1, Math.floor(maxSegments));
+  const indices =
+    points.length <= limit
+      ? points.map((_, index) => index)
+      : Array.from({ length: limit }, (_, index) =>
+          Math.round((index * (points.length - 1)) / (limit - 1)),
+        );
+  return indices.map((index) => {
+    const point = points[index] ?? points.at(-1)!;
     const ratio = Math.max(0, Math.min(1, (point.nominalExposure - 100) / 100));
     const hue = 170 - ratio * 145;
     return {
@@ -107,6 +125,24 @@ export function buildExposureRailSegments(points: DailyPoint[]): ExposureRailSeg
       color: `hsl(${hue} 62% 48%)`,
     };
   });
+}
+
+/** Keep a tooltip inside the visible plot; useful for both mouse and touch. */
+export function clampTooltipPosition(
+  left: number,
+  top: number,
+  hostWidth: number,
+  hostHeight: number,
+  tooltipWidth: number,
+  tooltipHeight: number,
+  margin = 10,
+): { left: number; top: number } {
+  const maxLeft = Math.max(margin, hostWidth - tooltipWidth - margin);
+  const maxTop = Math.max(margin, hostHeight - tooltipHeight - margin);
+  return {
+    left: Math.round(Math.min(Math.max(left, margin), maxLeft)),
+    top: Math.round(Math.min(Math.max(top, margin), maxTop)),
+  };
 }
 
 /**
@@ -209,6 +245,21 @@ export function createWorkbenchChart(
       horzLines: { color: css('--line'), style: LineStyle.Dotted },
     },
     crosshair: { mode: CrosshairMode.Normal },
+    // Let the document own vertical wheel/touch scrolling. Chart zoom and
+    // horizontal panning remain available through the range buttons so a
+    // pointer over the plot never traps the page at the chart boundary.
+    handleScroll: {
+      mouseWheel: false,
+      pressedMouseMove: false,
+      horzTouchDrag: false,
+      vertTouchDrag: false,
+    },
+    handleScale: {
+      mouseWheel: false,
+      pinch: false,
+      axisPressedMouseMove: { time: false, price: false },
+      axisDoubleClickReset: { time: true, price: true },
+    },
     rightPriceScale: { borderColor: css('--line') },
     timeScale: {
       borderColor: css('--line'),
@@ -271,11 +322,14 @@ export function createWorkbenchChart(
     eventLayer.style.right = 'auto';
     eventLayer.style.width = `${plotWidth}px`;
     rail.replaceChildren();
-    const segments = buildExposureRailSegments(current.points);
+    const segments = buildExposureRailSegments(
+      current.points,
+      Math.max(72, Math.min(120, Math.floor(plotWidth / 7))),
+    );
     segments.forEach((segment, index) => {
       const left = coordinate(segment.date);
       if (left === null) return;
-      const next = current?.points[index + 1];
+      const next = segments[index + 1];
       const right = next ? coordinate(next.date) : chart.timeScale().width();
       const span = document.createElement('span');
       span.className = 'chart-exposure-segment';
@@ -293,14 +347,12 @@ export function createWorkbenchChart(
       if (start === null && end === null) return;
       const left = Math.max(0, start ?? 0);
       const right = Math.min(chart.timeScale().width(), end ?? chart.timeScale().width());
-      if (isClosedExposureEvent(event)) {
-        const band = document.createElement('div');
-        band.className = 'chart-event-band';
-        band.style.left = `${Math.min(left, right)}px`;
-        band.style.width = `${Math.max(2, Math.abs(right - left))}px`;
-        band.title = event.title ?? `事件 ${event.startDate} — ${event.endDate}`;
-        eventLayer.append(band);
-      }
+      const band = document.createElement('div');
+      band.className = `chart-event-band${isClosedExposureEvent(event) ? '' : ' chart-event-band-open'}`;
+      band.style.left = `${Math.min(left, right)}px`;
+      band.style.width = `${Math.max(2, Math.abs(right - left))}px`;
+      band.title = event.title ?? `事件 ${event.startDate} — ${event.endDate}`;
+      eventLayer.append(band);
       const markerX = coordinate(event.peakDate ?? event.startDate);
       if (markerX === null) return;
       const marker = document.createElement('button');
@@ -326,10 +378,24 @@ export function createWorkbenchChart(
       tooltip.style.display = 'none';
       return;
     }
-    tooltip.style.display = 'block';
-    tooltip.style.left = `${Math.min((parameter.point?.x ?? 0) + 18, Math.max(12, host.clientWidth - 310))}px`;
-    tooltip.style.top = `${Math.max(10, (parameter.point?.y ?? 0) - 78)}px`;
     tooltip.innerHTML = formatChartPointTooltip(point);
+    tooltip.style.display = 'block';
+    const pointX = parameter.point?.x ?? 0;
+    const pointY = parameter.point?.y ?? 0;
+    const tooltipWidth = tooltip.offsetWidth || 320;
+    const tooltipHeight = tooltip.offsetHeight || 230;
+    const preferredTop = pointY - tooltipHeight - 14;
+    const fallbackTop = pointY + 14;
+    const position = clampTooltipPosition(
+      pointX + 18,
+      preferredTop >= 10 ? preferredTop : fallbackTop,
+      host.clientWidth,
+      host.clientHeight,
+      tooltipWidth,
+      tooltipHeight,
+    );
+    tooltip.style.left = `${position.left}px`;
+    tooltip.style.top = `${position.top}px`;
   });
 
   chart.timeScale().subscribeVisibleTimeRangeChange(scheduleOverlay);

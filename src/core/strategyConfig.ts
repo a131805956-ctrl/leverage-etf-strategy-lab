@@ -36,6 +36,9 @@ export function normalizeStrategyConfig(
   const { rebalance, ...strategy } = value;
   const allocationPolicy =
     'allocationPolicy' in value ? value.allocationPolicy : undefined;
+  const normalLeveragedWeight = (
+    value as Partial<StrategyConfig>
+  ).normalLeveragedWeight;
 
   const hasNewReductionRules = Array.isArray(
     (value as Partial<StrategyConfig>).reductionRules,
@@ -57,6 +60,15 @@ export function normalizeStrategyConfig(
   return {
     ...strategy,
     allocationPolicy: allocationPolicy ?? 'exact-target',
+    ...(normalLeveragedWeight === undefined
+      ? {}
+      : {
+          normalLeveragedWeight,
+          // New scenarios have one normal leverage target. Keep the legacy
+          // aliases synchronized so every engine branch uses the same value.
+          baseLeveragedWeight: normalLeveragedWeight,
+          highLeveragedWeight: normalLeveragedWeight,
+        }),
     reductionReference,
     ...(reductionRules ? { reductionRules } : {}),
     rebalance: normalizeRebalance(rebalance),

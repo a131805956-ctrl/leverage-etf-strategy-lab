@@ -204,21 +204,18 @@ export class StrategyLabApp {
                 <div class="field"><label for="end-date">結束日</label><input id="end-date" name="end-date" type="date" autocomplete="off"></div>
               </div>
               <div class="field"><label for="capital">單次投入金額（TWD）</label><input id="capital" name="capital" type="number" value="1000000" min="1000" step="10000" autocomplete="off"></div>
-              <div class="two-col">
-                <div class="field"><label for="base-weight">正常槓桿比 <span class="label-en">Normal leverage</span></label><input id="base-weight" name="base-weight" type="number" value="70" min="0" max="100" autocomplete="off"><p class="field-help">這是剛開始投入與創新高後的正常槓桿比例，不會因為一天沒有創新高就自動減倉。</p></div>
-                <div class="field"><label for="high-weight">創新高槓桿比 <span class="label-en">New-high leverage</span></label><input id="high-weight" name="high-weight" type="number" value="70" min="0" max="100" autocomplete="off"></div>
-              </div>
+              <div class="field"><label for="base-weight">正常槓桿比 <span class="label-en">Normal leverage</span></label><input id="base-weight" name="base-weight" type="number" value="70" min="0" max="100" autocomplete="off"><p class="field-help">創新高持有正常比例；只有回撤／反彈規則改變。</p></div>
               <div class="field"><label for="allocation-policy">權重執行方式</label><select id="allocation-policy" name="allocation-policy" autocomplete="off"><option value="minimum-floor" selected>讓利潤奔騰／最低持倉底線</option><option value="exact-target">精確目標比例</option></select></div>
-              <div class="mode-note" id="floor-mode-note">規則比例是規則事件發生時的最低成交要求，不會每日微調。實際槓桿權重較高時不賣出；只有強制再平衡會調回底線。</div>
+              <div class="mode-note" id="floor-mode-note">回撤加碼是至少持有的槓桿底線；新高或反彈減碼會把多餘槓桿轉回原型，回到正常比例。</div>
             </div>
             <div class="form-section">
               <div class="rule-section-heading"><h3>下跌加碼階梯 <span class="label-en">Downside adds</span></h3><span class="rule-actions"><button class="icon-button" type="button" data-action="remove-rule" data-rule-kind="drawdown" aria-label="移除下跌加碼條件">−</button><button class="icon-button" type="button" data-action="add-rule" data-rule-kind="drawdown" aria-label="新增下跌加碼條件">＋</button></span></div>
               <div id="drawdown-rules">${[[10,80],[20,90],[30,100]].map(([dd,w], index) => ruleRowMarkup('drawdown', index, dd ?? 10, w ?? 80)).join('')}</div>
             </div>
             <div class="form-section">
-              <div class="rule-section-heading"><h3>減碼階梯 <span class="label-en">Reduction ladder</span></h3><span class="rule-actions"><button class="icon-button" type="button" data-action="remove-rule" data-rule-kind="reduction" aria-label="移除減碼條件">−</button><button class="icon-button" type="button" data-action="add-rule" data-rule-kind="reduction" aria-label="新增減碼條件">＋</button></span></div>
-              <div class="field"><label for="reduction-reference">減碼參考 <span class="label-en">Reference</span></label><select id="reduction-reference" name="reduction-reference" autocomplete="off"><option value="new-high-decline" selected>創新高後回撤（不需谷底確認）</option><option value="prototype-rebound">原型 ETF 反彈</option><option value="leveraged-rebound">槓桿 ETF 反彈</option></select><p class="field-help" id="reduction-reference-help">由創新高回撤百分比觸發減倉</p></div>
-              <div id="reduction-rules">${[[10,60],[20,50]].map(([distance,w], index) => ruleRowMarkup('reduction', index, distance ?? 10, w ?? 60)).join('')}</div>
+              <div id="reduction-ladder-controls"><div class="rule-section-heading"><h3>減碼階梯 <span class="label-en">Reduction ladder</span></h3><span class="rule-actions"><button class="icon-button" type="button" data-action="remove-rule" data-rule-kind="reduction" aria-label="移除減碼條件">−</button><button class="icon-button" type="button" data-action="add-rule" data-rule-kind="reduction" aria-label="新增減碼條件">＋</button></span></div>
+              <div id="reduction-rules">${[[10,60],[20,50]].map(([distance,w], index) => ruleRowMarkup('reduction', index, distance ?? 10, w ?? 60)).join('')}</div></div>
+              <div class="field"><label for="reduction-reference">減碼參考 <span class="label-en">Reference</span></label><select id="reduction-reference" name="reduction-reference" autocomplete="off"><option value="new-high-decline" selected>創高後回歸正常（新高即減碼）</option><option value="prototype-rebound">原型 ETF 反彈</option><option value="leveraged-rebound">槓桿 ETF 反彈</option></select><p class="field-help" id="reduction-reference-help">創新高後把多餘槓桿部位轉回原型，回到正常槓桿比例。</p></div>
               <div class="field" id="recovery-confirm-field" hidden><label for="recovery-confirm">谷底反彈確認（%）</label><input id="recovery-confirm" name="recovery-confirm" type="number" value="5" min="0.1" max="50" step="0.5" autocomplete="off"><p class="field-help">只有選原型／槓桿反彈時才啟用。</p></div>
             </div>
             <div class="form-section">
@@ -320,6 +317,7 @@ export class StrategyLabApp {
       const reference = this.get<HTMLSelectElement>('reduction-reference').value as ReductionReference;
       const state = resolveReductionFormState(reference);
       this.get<HTMLInputElement>('recovery-confirm').closest('.field')?.toggleAttribute('hidden', !state.showConfirmation);
+      this.get('reduction-ladder-controls').toggleAttribute('hidden', reference === 'new-high-decline');
       this.get('reduction-reference-help').textContent = state.helperText;
     };
     this.get<HTMLSelectElement>('reduction-reference').addEventListener('change', updateReductionForm);
@@ -423,8 +421,11 @@ export class StrategyLabApp {
       pairId: pair.id,
       allocationPolicy: this.get<HTMLSelectElement>('allocation-policy')
         .value as StrategyConfig['allocationPolicy'],
+      normalLeveragedWeight: number('base-weight'),
       baseLeveragedWeight: number('base-weight'),
-      highLeveragedWeight: number('high-weight'),
+      // A new high keeps the same normal leverage; only drawdown/rebound
+      // rules are allowed to change exposure.
+      highLeveragedWeight: number('base-weight'),
       drawdownRules,
       reductionReference,
       reductionRules,
