@@ -144,8 +144,8 @@ describe('core enhancements', () => {
       { date: '2024-01-03', value: 110, prototypeValue: 44, leveragedValue: 66, cash: 0, prototypeWeight: 40, leveragedWeight: 60, targetLeveragedWeight: 65, nominalExposure: 160, drawdown: 0, regime: 'RECOVERY', benchmarkPrototype: 110, benchmarkLeveraged: 120 },
     ];
     const trades: TradeRecord[] = [
-      { date: '2024-01-02' as IsoDate, reason: 'DRAWDOWN' as const, prototypeValueBefore: 40, leveragedValueBefore: 60, cashBefore: 0, targetLeveragedWeight: 80, tradedValue: 20, cost: 0, note: '', leveragedSharesBought: 1, prototypeSharesBought: 0 },
-      { date: '2024-01-03' as IsoDate, reason: 'RECOVERY' as const, prototypeValueBefore: 38, leveragedValueBefore: 76, cashBefore: 0, targetLeveragedWeight: 65, tradedValue: 12, cost: 0, note: '', leveragedSharesSold: 1, prototypeSharesBought: 0 },
+      { date: '2024-01-02', reason: 'DRAWDOWN', prototypeValueBefore: 40, leveragedValueBefore: 60, cashBefore: 0, targetLeveragedWeight: 80, tradedValue: 20, cost: 0, note: '', leveragedSharesBought: 1, prototypeSharesBought: 0 },
+      { date: '2024-01-03', reason: 'RECOVERY', prototypeValueBefore: 38, leveragedValueBefore: 76, cashBefore: 0, targetLeveragedWeight: 65, tradedValue: 12, cost: 0, note: '', leveragedSharesSold: 1, prototypeSharesBought: 0 },
     ];
     const events = buildExposureEvents(points, trades);
     expect(events).toHaveLength(1);

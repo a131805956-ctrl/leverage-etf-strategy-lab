@@ -1,5 +1,37 @@
 import type { StrategyConfig } from '../core/types';
 
+export type ReductionReference =
+  | 'new-high-decline'
+  | 'prototype-rebound'
+  | 'leveraged-rebound';
+
+export interface ReductionFormState {
+  showConfirmation: boolean;
+  helperText: string;
+}
+
+/** The trough confirmation is meaningful only when a rebound series is selected. */
+export function resolveReductionFormState(
+  reference: ReductionReference,
+): ReductionFormState {
+  if (reference === 'prototype-rebound') {
+    return {
+      showConfirmation: true,
+      helperText: '以原型 ETF 自谷底反彈幅度觸發減倉',
+    };
+  }
+  if (reference === 'leveraged-rebound') {
+    return {
+      showConfirmation: true,
+      helperText: '以槓桿 ETF 自谷底反彈幅度觸發減倉',
+    };
+  }
+  return {
+    showConfirmation: false,
+    helperText: '由創新高回撤百分比觸發減倉',
+  };
+}
+
 export interface StrategyFormState {
   showCustomDays: boolean;
   showDriftThreshold: boolean;

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
+  resolveReductionFormState,
   resolveRebalanceSelection,
   resolveStrategyFormState,
 } from '../src/ui/strategyForm';
@@ -94,6 +95,43 @@ describe('resolveStrategyFormState', () => {
     expect(resolveStrategyFormState('minimum-floor', 'drift')).toMatchObject({
       showWarning: true,
     });
+  });
+});
+
+describe('reduction form state', () => {
+  it('shows trough confirmation only for prototype or leveraged rebound references', () => {
+    expect(resolveReductionFormState('new-high-decline')).toEqual({
+      showConfirmation: false,
+      helperText: '由創新高回撤百分比觸發減倉',
+    });
+    expect(resolveReductionFormState('prototype-rebound')).toMatchObject({
+      showConfirmation: true,
+    });
+    expect(resolveReductionFormState('leveraged-rebound')).toMatchObject({
+      showConfirmation: true,
+    });
+  });
+});
+
+describe('strategy drawer rule controls', () => {
+  it('ships three downside-add rows and two reduction rows with +/- controls', () => {
+    expect(drawerSource).toContain("[[10,80],[20,90],[30,100]].map");
+    expect(drawerSource).toContain("[[10,60],[20,50]].map");
+    expect(drawerSource).toContain('data-action="add-rule"');
+    expect(drawerSource).toContain('data-action="remove-rule"');
+  });
+
+  it('does not include the TradingView logo or data-health panel', () => {
+    expect(appSource).not.toMatch(/TradingView|tradingview-logo/i);
+    expect(appSource).not.toContain('id="data-health"');
+    expect(appSource).not.toContain('id="exposure-track"');
+  });
+
+  it('wires exposure event markers to a large detail modal', () => {
+    expect(appSource).toContain('event-detail-modal');
+    expect(appSource).toContain('onEventClick');
+    expect(appSource).toContain('addTrades');
+    expect(appSource).toContain('reductionTrades');
   });
 });
 

@@ -13,11 +13,6 @@ import type {
 import { PAIRS, pairById } from '../config/pairs';
 import { loadMarketData } from '../data/client';
 import {
-  coversCutoffMonth,
-  needsRefresh,
-  requiredCutoff,
-} from '../data/freshness';
-import {
   createOptimizationCandidate,
   gridSearch,
 } from '../optimization/gridSearch';
@@ -30,8 +25,13 @@ import {
   isPortableScenarioFile,
   type ScenarioRepository,
 } from '../storage/repository';
-import { createWorkbenchChart, type WorkbenchChart } from './chart';
 import {
+  createWorkbenchChart,
+  type ChartEvent,
+  type WorkbenchChart,
+} from './chart';
+import {
+  resolveReductionFormState,
   resolveRebalanceSelection,
   resolveStrategyFormState,
 } from './strategyForm';
@@ -62,6 +62,26 @@ const download = (name: string, content: string, type: string): void => {
   URL.revokeObjectURL(anchor.href);
 };
 
+type ReductionReference =
+  | 'new-high-decline'
+  | 'prototype-rebound'
+  | 'leveraged-rebound';
+
+const ruleRowMarkup = (
+  kind: 'drawdown' | 'reduction',
+  index: number,
+  threshold: number,
+  leveragedWeight: number,
+): string => {
+  const label = kind === 'drawdown' ? '下跌幅度' : '觸發幅度';
+  const prefix = kind === 'drawdown' ? 'dd' : 'reduction';
+  return `<div class="rule-row" data-rule="${kind}" data-index="${index}">
+    <input id="${prefix}-${index}" name="${prefix}-threshold-${index}" type="number" value="${threshold}" min="0" max="100" step="0.5" aria-label="${label} ${index + 1}" autocomplete="off">
+    <span class="rule-arrow" aria-hidden="true">→</span>
+    <input id="${prefix}w-${index}" name="${prefix}-weight-${index}" type="number" value="${leveragedWeight}" min="0" max="100" step="1" aria-label="槓桿比例 ${index + 1}" autocomplete="off">
+  </div>`;
+};
+
 export class StrategyLabApp {
   private bundle?: MarketDataBundle;
   private pairId = 'tw50';
@@ -69,6 +89,7 @@ export class StrategyLabApp {
   private portfolio?: PortfolioResult;
   private chart?: WorkbenchChart;
   private saved: SavedScenario[] = [];
+  private optimizerCandidates = new Map<string, BacktestResult>();
   private repository: ScenarioRepository;
 
   constructor(private readonly root: HTMLElement) {
@@ -85,7 +106,7 @@ export class StrategyLabApp {
       this.bundle = await loadMarketData();
       this.saved = await this.repository.list();
       this.setPair(this.pairId);
-      this.renderDataHealth();
+      this.get('data-status').textContent = '資料快取已載入';
       this.renderLibrary();
       this.renderPortfolioOptions();
       this.toast('市場資料與策略引擎已就緒');
@@ -140,14 +161,9 @@ export class StrategyLabApp {
                   </div>
                 </div>
                 <div class="chart-host" id="chart-host"><div class="chart-tooltip" id="chart-tooltip"></div></div>
-                <div class="exposure-strip">
-                  <div class="exposure-head"><span>EXPOSURE RAIL · 名目曝險軌道</span><span>100% 原型 ← → 200% 全槓桿</span></div>
-                  <div class="exposure-track" id="exposure-track"></div>
-                </div>
               </section>
-              <div class="lower-grid">
-                <section class="panel"><div class="panel-head"><div class="panel-title">操作與再平衡紀錄</div><div class="subtitle" id="trade-count"></div></div><div class="table-wrap" id="trade-table"><div class="empty">尚未執行回測</div></div></section>
-                <section class="panel"><div class="panel-head"><div class="panel-title">資料健康</div></div><div class="table-wrap" id="data-health"><div class="empty">檢查資料中</div></div></section>
+              <div class="lower-grid operation-grid">
+                <section class="panel"><div class="panel-head"><div class="panel-title">操作與再平衡紀錄 <span class="panel-title-en">Operations &amp; Rebalances</span></div><div class="subtitle" id="trade-count"></div></div><div class="table-wrap" id="trade-table"><div class="empty">尚未執行回測</div></div></section>
               </div>
             </section>
 
@@ -170,7 +186,7 @@ export class StrategyLabApp {
 
             <section class="view" id="view-optimizer">
               <div class="page-head"><div><div class="eyebrow">Local optimizer / 不需 API</div><h1>多目標策略搜尋</h1><p class="subtitle">同時看報酬、回撤、Sharpe 與 Calmar，不把單一最高值當答案</p></div><button class="button dark" id="run-optimizer">執行快速窮舉</button></div>
-              <section class="panel"><div class="panel-head"><div class="panel-title">Pareto 候選策略</div><div class="subtitle" id="optimizer-status" role="status" aria-live="polite">等待執行</div></div><div class="table-wrap" id="optimizer-results"><div class="empty">搜尋會使用目前交易對與日期範圍，共 108 組參數。</div></div></section>
+              <section class="panel"><div class="panel-head"><div class="panel-title">Pareto 候選策略</div><div class="subtitle" id="optimizer-status" role="status" aria-live="polite">等待執行</div></div><div class="table-wrap" id="optimizer-results"><div class="empty">搜尋目前交易對的正常槓桿與下跌加碼階梯；不納入初始比例，也不強制再平衡。</div></div></section>
             </section>
 
             <section class="view" id="view-library">
@@ -181,6 +197,7 @@ export class StrategyLabApp {
 
           <aside class="drawer" id="strategy-drawer">
             <div class="drawer-head"><div><div class="eyebrow">Strategy rules</div><h2>策略守則</h2></div><button class="icon-button" id="close-config" aria-label="關閉策略設定"><span aria-hidden="true">×</span></button></div>
+            <div class="mode-warning" id="optimizer-preview-note" hidden>目前為窮舉候選預覽（Optimizer preview）。參數已鎖定，僅供檢視。<button class="button" type="button" id="exit-optimizer-preview">返回可編輯策略</button></div>
             <div class="form-section">
               <div class="two-col">
                 <div class="field"><label for="start-date">開始日</label><input id="start-date" name="start-date" type="date" autocomplete="off"></div>
@@ -188,20 +205,21 @@ export class StrategyLabApp {
               </div>
               <div class="field"><label for="capital">單次投入金額（TWD）</label><input id="capital" name="capital" type="number" value="1000000" min="1000" step="10000" autocomplete="off"></div>
               <div class="two-col">
-                <div class="field"><label for="base-weight">初始投入槓桿比</label><input id="base-weight" name="base-weight" type="number" value="60" min="0" max="100" autocomplete="off"><p class="field-help">只用於開始日第一筆持倉，之後不會因離開新高而退回此比例。</p></div>
-                <div class="field"><label for="high-weight">創新高槓桿比</label><input id="high-weight" name="high-weight" type="number" value="70" min="0" max="100" autocomplete="off"></div>
+                <div class="field"><label for="base-weight">正常槓桿比 <span class="label-en">Normal leverage</span></label><input id="base-weight" name="base-weight" type="number" value="70" min="0" max="100" autocomplete="off"><p class="field-help">這是剛開始投入與創新高後的正常槓桿比例，不會因為一天沒有創新高就自動減倉。</p></div>
+                <div class="field"><label for="high-weight">創新高槓桿比 <span class="label-en">New-high leverage</span></label><input id="high-weight" name="high-weight" type="number" value="70" min="0" max="100" autocomplete="off"></div>
               </div>
               <div class="field"><label for="allocation-policy">權重執行方式</label><select id="allocation-policy" name="allocation-policy" autocomplete="off"><option value="minimum-floor" selected>讓利潤奔騰／最低持倉底線</option><option value="exact-target">精確目標比例</option></select></div>
               <div class="mode-note" id="floor-mode-note">規則比例是規則事件發生時的最低成交要求，不會每日微調。實際槓桿權重較高時不賣出；只有強制再平衡會調回底線。</div>
             </div>
             <div class="form-section">
-              <h3>下跌加碼階梯</h3>
-              ${[[10,80],[20,90],[30,100]].map(([dd,w], index) => `<div class="rule-row"><input id="dd-${index}" name="drawdown-threshold-${index}" type="number" value="${dd}" aria-label="回撤門檻" autocomplete="off"><span class="rule-arrow">→</span><input id="ddw-${index}" name="drawdown-weight-${index}" type="number" value="${w}" aria-label="槓桿權重" autocomplete="off"></div>`).join('')}
+              <div class="rule-section-heading"><h3>下跌加碼階梯 <span class="label-en">Downside adds</span></h3><span class="rule-actions"><button class="icon-button" type="button" data-action="remove-rule" data-rule-kind="drawdown" aria-label="移除下跌加碼條件">−</button><button class="icon-button" type="button" data-action="add-rule" data-rule-kind="drawdown" aria-label="新增下跌加碼條件">＋</button></span></div>
+              <div id="drawdown-rules">${[[10,80],[20,90],[30,100]].map(([dd,w], index) => ruleRowMarkup('drawdown', index, dd ?? 10, w ?? 80)).join('')}</div>
             </div>
             <div class="form-section">
-              <h3>反彈最低槓桿底線</h3>
-              ${[[20,90],[10,80],[5,70]].map(([distance,w], index) => `<div class="rule-row"><input id="rc-${index}" name="recovery-distance-${index}" type="number" value="${distance}" aria-label="距前高" autocomplete="off"><span class="rule-arrow">→</span><input id="rcw-${index}" name="recovery-weight-${index}" type="number" value="${w}" aria-label="槓桿權重" autocomplete="off"></div>`).join('')}
-              <div class="field"><label for="recovery-confirm">谷底反彈確認（%）</label><input id="recovery-confirm" name="recovery-confirm" type="number" value="5" min="0.1" max="50" step="0.5" autocomplete="off"></div>
+              <div class="rule-section-heading"><h3>減碼階梯 <span class="label-en">Reduction ladder</span></h3><span class="rule-actions"><button class="icon-button" type="button" data-action="remove-rule" data-rule-kind="reduction" aria-label="移除減碼條件">−</button><button class="icon-button" type="button" data-action="add-rule" data-rule-kind="reduction" aria-label="新增減碼條件">＋</button></span></div>
+              <div class="field"><label for="reduction-reference">減碼參考 <span class="label-en">Reference</span></label><select id="reduction-reference" name="reduction-reference" autocomplete="off"><option value="new-high-decline" selected>創新高後回撤（不需谷底確認）</option><option value="prototype-rebound">原型 ETF 反彈</option><option value="leveraged-rebound">槓桿 ETF 反彈</option></select><p class="field-help" id="reduction-reference-help">由創新高回撤百分比觸發減倉</p></div>
+              <div id="reduction-rules">${[[10,60],[20,50]].map(([distance,w], index) => ruleRowMarkup('reduction', index, distance ?? 10, w ?? 60)).join('')}</div>
+              <div class="field" id="recovery-confirm-field" hidden><label for="recovery-confirm">谷底反彈確認（%）</label><input id="recovery-confirm" name="recovery-confirm" type="number" value="5" min="0.1" max="50" step="0.5" autocomplete="off"><p class="field-help">只有選原型／槓桿反彈時才啟用。</p></div>
             </div>
             <div class="form-section">
               <div class="field"><label for="rebalance">強制再平衡</label><select id="rebalance" name="rebalance" autocomplete="off"><option value="none" selected>永不</option><option value="interval-30">每 30 日曆天</option><option value="interval-180">每 180 日曆天</option><option value="interval-365">每 365 日曆天</option><option value="interval-custom">自訂日曆天</option><optgroup label="進階選項"><option value="monthly">每月</option><option value="quarterly">每季</option><option value="annual">每年</option><option value="drift">偏離門檻</option></optgroup></select></div>
@@ -222,8 +240,14 @@ export class StrategyLabApp {
             <div class="notice">估計曝險 = 100% + 槓桿 ETF 權重。訊號只用當日以前資料，並於下一交易日開盤成交。</div>
             <div style="height:12px"></div>
             <button class="button primary" id="run-backtest">套用守則並回測</button>
-          </aside>
-        </div>
+           </aside>
+           <div class="event-detail-modal" id="event-detail-modal" hidden role="dialog" aria-modal="true" aria-labelledby="event-detail-title">
+             <div class="event-modal-card">
+               <div class="event-modal-head"><div><div class="eyebrow">Exposure episode / 加倉事件</div><h2 id="event-detail-title">事件詳細資料</h2></div><button class="icon-button" id="close-event-modal" type="button" aria-label="關閉事件詳細資料">×</button></div>
+               <div class="event-modal-body" id="event-detail-content"></div>
+             </div>
+           </div>
+         </div>
       </div>`;
 
     const host = this.get<HTMLElement>('chart-host');
@@ -247,6 +271,13 @@ export class StrategyLabApp {
     if (theme === 'dark') document.documentElement.dataset.theme = 'dark';
     this.get('open-config').addEventListener('click', () => this.get('strategy-drawer').classList.add('open'));
     this.get('close-config').addEventListener('click', () => this.get('strategy-drawer').classList.remove('open'));
+    this.get('close-event-modal').addEventListener('click', () => this.closeEventModal());
+    this.get('event-detail-modal').addEventListener('click', (event) => {
+      if (event.target === event.currentTarget) this.closeEventModal();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') this.closeEventModal();
+    });
     this.get('run-backtest').addEventListener('click', () => this.runCurrent());
     this.get('save-scenario').addEventListener('click', () => void this.saveCurrent());
     this.get('export-json').addEventListener('click', () => this.exportCurrent());
@@ -285,6 +316,38 @@ export class StrategyLabApp {
     allocationPolicy.addEventListener('change', updateStrategyForm);
     rebalance.addEventListener('change', updateStrategyForm);
     updateStrategyForm();
+    const updateReductionForm = (): void => {
+      const reference = this.get<HTMLSelectElement>('reduction-reference').value as ReductionReference;
+      const state = resolveReductionFormState(reference);
+      this.get<HTMLInputElement>('recovery-confirm').closest('.field')?.toggleAttribute('hidden', !state.showConfirmation);
+      this.get('reduction-reference-help').textContent = state.helperText;
+    };
+    this.get<HTMLSelectElement>('reduction-reference').addEventListener('change', updateReductionForm);
+    updateReductionForm();
+    const renderRuleRows = (kind: 'drawdown' | 'reduction', rows: Array<{ threshold: number; leveragedWeight: number }>): void => {
+      this.get(`${kind}-rules`).innerHTML = rows.map((row, index) => ruleRowMarkup(kind, index, row.threshold, row.leveragedWeight)).join('');
+    };
+    document.querySelectorAll<HTMLButtonElement>('[data-action="add-rule"], [data-action="remove-rule"]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const kind = button.dataset.ruleKind as 'drawdown' | 'reduction';
+        const rows = [...document.querySelectorAll<HTMLElement>(`[data-rule="${kind}"]`)]
+          .sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index))
+          .map((row) => ({
+            threshold: Number((row.querySelector('input:first-child') as HTMLInputElement).value),
+            leveragedWeight: Number((row.querySelector('input:last-child') as HTMLInputElement).value),
+          }));
+        if (button.dataset.action === 'add-rule' && rows.length < 8) {
+          const last = rows.at(-1) ?? { threshold: 10, leveragedWeight: kind === 'drawdown' ? 80 : 60 };
+          rows.push({ threshold: Math.min(100, last.threshold + 10), leveragedWeight: Math.min(100, last.leveragedWeight + (kind === 'drawdown' ? 10 : -10)) });
+        }
+        if (button.dataset.action === 'remove-rule' && rows.length > 1) rows.pop();
+        renderRuleRows(kind, rows);
+      });
+    });
+    this.get('exit-optimizer-preview').addEventListener('click', () => {
+      this.setStrategyControlsDisabled(false);
+      this.get('optimizer-preview-note').setAttribute('hidden', '');
+    });
     this.get<HTMLInputElement>('cost-enabled').addEventListener('change', (event) => {
       this.get('cost-fields').hidden = !(event.target as HTMLInputElement).checked;
     });
@@ -305,6 +368,14 @@ export class StrategyLabApp {
     this.get(`view-${view}`).classList.add('active');
   }
 
+  private setStrategyControlsDisabled(disabled: boolean): void {
+    this.get('strategy-drawer').querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input, select, button').forEach((control) => {
+      if (control.id === 'close-config' || control.id === 'exit-optimizer-preview') return;
+      control.disabled = disabled;
+    });
+    this.get('optimizer-preview-note').toggleAttribute('hidden', !disabled);
+  }
+
   private setPair(pairId: string): void {
     if (!this.bundle) return;
     this.pairId = pairId;
@@ -319,7 +390,9 @@ export class StrategyLabApp {
     const first = common[0];
     const last = common.at(-1);
     if (!first || !last) throw new Error('交易對沒有共同日期');
-    const defaultStart = common[Math.max(0, common.length - 1500)] ?? first;
+    // The default run should cover the complete common history. Users can still
+    // narrow the range manually in the strategy drawer.
+    const defaultStart = first;
     const startInput = this.get<HTMLInputElement>('start-date');
     const endInput = this.get<HTMLInputElement>('end-date');
     startInput.min = first;
@@ -334,6 +407,16 @@ export class StrategyLabApp {
 
   private strategy(pair: PairDefinition): StrategyConfig {
     const number = (id: string): number => Number(this.get<HTMLInputElement>(id).value);
+    const readRows = (kind: 'drawdown' | 'reduction'): Array<{ threshold: number; leveragedWeight: number }> =>
+      [...document.querySelectorAll<HTMLElement>(`[data-rule="${kind}"]`)]
+        .sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index))
+        .map((row) => ({
+          threshold: Number((row.querySelector('input:first-child') as HTMLInputElement).value),
+          leveragedWeight: Number((row.querySelector('input:last-child') as HTMLInputElement).value),
+        }));
+    const drawdownRules = readRows('drawdown');
+    const reductionRules = readRows('reduction');
+    const reductionReference = this.get<HTMLSelectElement>('reduction-reference').value as ReductionReference;
     return {
       id: `strategy-${pair.id}`,
       name: `${pair.name}回撤階梯`,
@@ -342,8 +425,11 @@ export class StrategyLabApp {
         .value as StrategyConfig['allocationPolicy'],
       baseLeveragedWeight: number('base-weight'),
       highLeveragedWeight: number('high-weight'),
-      drawdownRules: [0, 1, 2].map((index) => ({ threshold: number(`dd-${index}`), leveragedWeight: number(`ddw-${index}`) })),
-      recoveryRules: [0, 1, 2].map((index) => ({ distanceToHigh: number(`rc-${index}`), leveragedWeight: number(`rcw-${index}`) })),
+      drawdownRules,
+      reductionReference,
+      reductionRules,
+      // Keep the legacy recovery fields in saved scenarios and old engines.
+      recoveryRules: reductionRules.map((rule) => ({ distanceToHigh: rule.threshold, leveragedWeight: rule.leveragedWeight })),
       recoveryConfirmationPct: number('recovery-confirm'),
       rebalance: resolveRebalanceSelection(
         this.get<HTMLSelectElement>('rebalance').value,
@@ -381,6 +467,7 @@ export class StrategyLabApp {
             ? [{ date: reinvestDate, target: this.get<HTMLSelectElement>('dividend-target').value as 'prototype' | 'leveraged' | 'target-allocation' }]
             : [],
       });
+      this.setStrategyControlsDisabled(false);
       this.renderCurrent();
       this.get('strategy-drawer').classList.remove('open');
     } catch (error) {
@@ -407,49 +494,56 @@ export class StrategyLabApp {
     });
     this.chart?.destroy();
     this.chart = createWorkbenchChart(this.get('chart-host'), this.get('chart-tooltip'));
-    this.chart.render(this.current);
+    this.chart.render(this.current, {
+      onEventClick: (event) => this.openEventModal(event),
+    });
     if (window.innerWidth <= 720) this.chart.setRange(3);
-    this.renderExposure();
     this.renderTrades();
-  }
-
-  private renderExposure(): void {
-    if (!this.current) return;
-    const track = this.get('exposure-track');
-    const stride = Math.max(1, Math.ceil(this.current.points.length / 360));
-    track.innerHTML = this.current.points
-      .filter((_, index) => index % stride === 0)
-      .map((point) => {
-        const ratio = Math.max(0, Math.min(1, (point.nominalExposure - 100) / 100));
-        const hue = 170 - ratio * 145;
-        return `<span class="exposure-segment" title="${point.date} · ${point.nominalExposure.toFixed(0)}%" style="background:hsl(${hue} 62% 48%)"></span>`;
-      })
-      .join('');
   }
 
   private renderTrades(): void {
     if (!this.current) return;
     this.get('trade-count').textContent = `${this.current.trades.length} 筆 · 成本 ${money.format(this.current.metrics.totalCosts)}`;
-    const rows = this.current.trades.slice().reverse().slice(0, 120);
-    this.get('trade-table').innerHTML = `<table><thead><tr><th>日期</th><th>原因</th><th>目標槓桿比</th><th>交易額</th><th>說明</th></tr></thead><tbody>${rows
-      .map((trade) => `<tr><td>${trade.date}</td><td>${trade.reason}</td><td class="data">${trade.targetLeveragedWeight.toFixed(0)}%</td><td class="data">${money.format(trade.tradedValue)}</td><td>${escapeHtml(trade.note)}</td></tr>`)
+    // Keep every operation available for audit/export; the scroll container
+    // handles long histories without dropping early trades.
+    const rows = this.current.trades.slice().reverse();
+    const value = (trade: typeof rows[number], key: string): number | undefined => {
+      const candidate = (trade as unknown as Record<string, unknown>)[key];
+      return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : undefined;
+    };
+    const shareSummary = (trade: typeof rows[number], boughtKey: string, soldKey: string): string => {
+      const bought = value(trade, boughtKey);
+      const sold = value(trade, soldKey);
+      if (bought === undefined && sold === undefined) return '—';
+      return `買 ${bought?.toFixed(3) ?? '0.000'} ／ 賣 ${sold?.toFixed(3) ?? '0.000'}`;
+    };
+    const price = (trade: typeof rows[number], key: string): string => {
+      const amount = value(trade, key);
+      return amount === undefined ? '—' : money.format(amount);
+    };
+    this.get('trade-table').innerHTML = `<table><thead><tr><th>日期<br><span class="th-en">Date</span></th><th>原因<br><span class="th-en">Reason</span></th><th>標的</th><th>買／賣股數<br><span class="th-en">Shares ±</span></th><th>成交價<br><span class="th-en">Price</span></th><th>成交額<br><span class="th-en">Notional</span></th><th>手續費<br><span class="th-en">Cost</span></th><th>交易後現值<br><span class="th-en">Value after</span></th><th>目標槓桿</th><th>說明</th></tr></thead><tbody>${rows
+      .map((trade) => `<tr><td>${trade.date}</td><td><span class="tag tag-${trade.reason.toLowerCase()}">${trade.reason}</span></td><td><div>原型</div><div>槓桿</div></td><td class="data"><div>${shareSummary(trade, 'prototypeSharesBought', 'prototypeSharesSold')}</div><div>${shareSummary(trade, 'leveragedSharesBought', 'leveragedSharesSold')}</div></td><td class="data"><div>${price(trade, 'prototypePrice')}</div><div>${price(trade, 'leveragedPrice')}</div></td><td class="data">${money.format(trade.tradedValue)}</td><td class="data">${money.format(trade.cost)}</td><td class="data"><div>${price(trade, 'prototypeValueAfter')}</div><div>${price(trade, 'leveragedValueAfter')}</div><strong>${price(trade, 'totalValueAfter')}</strong></td><td class="data">${trade.targetLeveragedWeight.toFixed(0)}%</td><td>${escapeHtml(trade.note)}</td></tr>`)
       .join('')}</tbody></table>`;
   }
 
-  private renderDataHealth(): void {
-    if (!this.bundle) return;
-    const cutoff = requiredCutoff();
-    const snapshotStale = needsRefresh(this.bundle.requiredCutoff);
-    const rows = PAIRS.flatMap((pair) => [pair.prototype.symbol, pair.leveraged.symbol]).map((symbol) => {
-      const series = this.bundle?.series[symbol];
-      const latest = series?.bars.at(-1)?.date;
-      const stale =
-        snapshotStale ||
-        !coversCutoffMonth(latest, this.bundle?.requiredCutoff ?? cutoff);
-      return `<tr><td>${symbol.replace('.TW', '')}</td><td class="data">${series?.bars.length ?? 0}</td><td>${latest ?? '—'}</td><td class="${stale ? 'danger' : ''}">${stale ? '需更新' : '完整'}</td></tr>`;
-    });
-    this.get('data-health').innerHTML = `<table><thead><tr><th>標的</th><th>筆數</th><th>最後資料</th><th>狀態</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
-    this.get('data-status').textContent = `必要截止 ${cutoff}`;
+  private openEventModal(event: ChartEvent): void {
+    const modal = this.get('event-detail-modal');
+    const title = this.get('event-detail-title');
+    const content = this.get('event-detail-content');
+    title.textContent = `${event.startDate} → ${event.endDate}`;
+    const tradeRows = [...(event.addTrades ?? []), ...(event.reductionTrades ?? [])]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((trade) => `<tr><td>${trade.date}</td><td>${trade.reason}</td><td>${trade.targetLeveragedWeight.toFixed(0)}%</td><td class="data">${money.format(trade.tradedValue)}</td><td class="data">${money.format(trade.totalValueAfter ?? 0)}</td><td>${escapeHtml(trade.note)}</td></tr>`)
+      .join('');
+    const stageRows = (event.stages ?? [])
+      .map((stage) => `<tr><td>${stage.date}</td><td>${stage.trigger ?? stage.reason ?? 'MARK'}</td><td class="data">${money.format(stage.capital ?? stage.value ?? 0)}</td><td class="data">${(stage.prototypeWeight ?? 0).toFixed(1)}% / ${(stage.leveragedWeight ?? 0).toFixed(1)}%</td><td class="data">${(stage.nominalExposure ?? 0).toFixed(1)}%</td></tr>`)
+      .join('');
+    content.innerHTML = `<div class="event-summary"><div><span>起點 Peak</span><strong>${event.peakDate ?? event.startDate}</strong></div><div><span>區間 Duration</span><strong>${event.startDate} – ${event.endDate}</strong></div><div><span>加倉階段 Adds</span><strong>${event.addTrades?.length ?? 0}</strong></div><div><span>減碼階段 Reductions</span><strong>${event.reductionTrades?.length ?? 0}</strong></div></div><h3>完整操作紀錄 / Trade log</h3><div class="table-wrap event-table"><table><thead><tr><th>日期</th><th>原因</th><th>目標槓桿</th><th>成交額</th><th>交易後現值</th><th>說明</th></tr></thead><tbody>${tradeRows || '<tr><td colspan="6">無操作紀錄</td></tr>'}</tbody></table></div><h3>各階段資金與曝險 / Stages</h3><div class="table-wrap event-table"><table><thead><tr><th>日期</th><th>觸發</th><th>資金</th><th>權重</th><th>名目曝險</th></tr></thead><tbody>${stageRows || '<tr><td colspan="5">無階段資料</td></tr>'}</tbody></table></div>`;
+    modal.removeAttribute('hidden');
+  }
+
+  private closeEventModal(): void {
+    this.get('event-detail-modal').setAttribute('hidden', '');
   }
 
   private async saveCurrent(): Promise<void> {
@@ -543,7 +637,25 @@ export class StrategyLabApp {
         child,
       );
       const metrics = this.portfolio.metrics;
-      this.get('portfolio-result').innerHTML = `<div class="result-callout"><div class="eyebrow">Combined result</div><h2>${escapeHtml(this.portfolio.config.name)}</h2><p>期末資產 <strong>${money.format(metrics.finalValue)}</strong> · 年化 ${percent(metrics.cagr)} · 最大回撤 -${metrics.maxDrawdown.toFixed(1)}%</p><p class="subtitle">${this.portfolio.transfers.length} 次跨組再平衡 · 指紋 ${this.portfolio.fingerprint}</p></div><div style="height:14px"></div><table><thead><tr><th>日期</th><th>原因</th><th>資金移轉</th></tr></thead><tbody>${this.portfolio.transfers.slice(-20).reverse().map((transfer) => `<tr><td>${transfer.date}</td><td>${transfer.reason}</td><td class="data">${Object.values(transfer.amounts).map((value) => money.format(value)).join(' / ')}</td></tr>`).join('')}</tbody></table>`;
+      const portfolioMetrics: Array<[string, string, string]> = [
+        ['總報酬 Total return', percent(metrics.totalReturn), '期末資產相對初始投入的累積報酬'],
+        ['期末資產 Final value', money.format(metrics.finalValue), '回測最後一日組合市值'],
+        ['年化報酬 CAGR', percent(metrics.cagr), '以日曆天年化的複合報酬率'],
+        ['最大回撤 Max drawdown', `-${metrics.maxDrawdown.toFixed(1)}%`, '從歷史高點到谷底的最大跌幅'],
+        ['年化波動 Volatility', `${metrics.annualizedVolatility.toFixed(1)}%`, '日報酬標準差年化'],
+        ['下行波動 Downside vol.', `${metrics.downsideVolatility.toFixed(1)}%`, '只計算負報酬的波動'],
+        ['Sharpe ratio', metrics.sharpe.toFixed(2), '每單位總波動換得的超額報酬'],
+        ['Sortino ratio', metrics.sortino.toFixed(2), '每單位下行風險換得的超額報酬'],
+        ['Calmar ratio', metrics.calmar.toFixed(2), '年化報酬除以最大回撤'],
+        ['Ulcer index', metrics.ulcerIndex.toFixed(2), '衡量回撤深度與持續時間'],
+        ['VaR 95%', `${metrics.valueAtRisk95.toFixed(2)}%`, '單日 95% 信賴區間的損失門檻'],
+        ['CVaR 95%', `${metrics.conditionalValueAtRisk95.toFixed(2)}%`, '最差 5% 日子的平均損失'],
+        ['平均名目曝險 Avg. exposure', `${metrics.averageExposure.toFixed(1)}%`, '期間每日名目曝險平均'],
+        ['換手率 Turnover', `${metrics.turnover.toFixed(1)}%`, '交易金額相對初始資金'],
+        ['交易／再平衡 Trades', String(metrics.tradeCount), '跨組資金轉移與子策略交易總數'],
+        ['總成本 Total costs', money.format(metrics.totalCosts), '手續費、稅與滑價合計'],
+      ];
+      this.get('portfolio-result').innerHTML = `<div class="result-callout"><div class="eyebrow">Combined result / 組合結果</div><h2>${escapeHtml(this.portfolio.config.name)}</h2><div class="portfolio-hero"><div><span>總報酬 Total return</span><strong>${percent(metrics.totalReturn)}</strong></div><div><span>期末資產 Final value</span><strong>${money.format(metrics.finalValue)}</strong></div></div><p class="subtitle">${this.portfolio.transfers.length} 次跨組再平衡 · ${this.portfolio.config.rebalance.mode} · 指紋 ${this.portfolio.fingerprint}</p></div><div class="portfolio-metric-grid">${portfolioMetrics.map(([label, value, help]) => `<div class="portfolio-metric" title="${help}"><span>${label}</span><strong>${value}</strong><small>${help}</small></div>`).join('')}</div><div class="table-wrap portfolio-transfer-table"><table><thead><tr><th>日期 Date</th><th>原因 Reason</th><th>資金移轉 Amounts</th></tr></thead><tbody>${this.portfolio.transfers.slice(-30).reverse().map((transfer) => `<tr><td>${transfer.date}</td><td>${transfer.reason}</td><td class="data">${Object.values(transfer.amounts).map((value) => money.format(value)).join(' / ')}</td></tr>`).join('')}</tbody></table></div>`;
     } catch (error) {
       this.toast(error instanceof Error ? error.message : '組合回測失敗', true);
     }
@@ -562,25 +674,17 @@ export class StrategyLabApp {
           baseStrategy.allocationPolicy === 'minimum-floor'
             ? '最低持倉底線'
             : '精確目標比例';
-        const rebalanceLabels: Record<
-          Exclude<StrategyConfig['rebalance']['mode'], 'calendar-interval'>,
-          string
-        > = {
-          none: '永不',
-          monthly: '每月',
-          quarterly: '每季',
-          annual: '每年',
-          drift: `偏離 ${baseStrategy.rebalance.driftThreshold} 個百分點`,
+        const rebalanceLabel = '不再平衡／No rebalance';
+        this.optimizerCandidates.clear();
+        const optimizerBaseStrategy = {
+          ...baseStrategy,
+          rebalance: { mode: 'none' as const, driftThreshold: baseStrategy.rebalance.driftThreshold },
         };
-        const rebalanceLabel =
-          baseStrategy.rebalance.mode === 'calendar-interval'
-            ? `每 ${baseStrategy.rebalance.intervalDays} 日曆天`
-            : rebalanceLabels[baseStrategy.rebalance.mode];
         const grid = gridSearch(
-          { base: [40, 50, 60, 70], high: [50, 60, 70], dd10: [70, 80, 90], dd20: [80, 90, 100] },
+          { normal: [50, 60, 70, 80], dd10: [70, 80, 90], dd20: [80, 90, 100] },
           (parameters) => {
             const candidate = createOptimizationCandidate(
-              baseStrategy,
+              optimizerBaseStrategy,
               parameters,
             );
             const result = runBacktest({
@@ -592,6 +696,7 @@ export class StrategyLabApp {
               endDate: this.get<HTMLInputElement>('end-date').value as IsoDate,
               initialCapital: 1_000_000,
             });
+            this.optimizerCandidates.set(JSON.stringify(parameters), result);
             return {
               score: result.metrics.cagr + result.metrics.sharpe * 2 - result.metrics.maxDrawdown * 0.2,
               metrics: {
@@ -606,10 +711,23 @@ export class StrategyLabApp {
         const flat = grid.map((candidate, index) => ({ index, cagr: candidate.metrics.cagr, maxDrawdown: candidate.metrics.maxDrawdown }));
         const front = new Set(paretoFront(flat, [{ key: 'cagr', direction: 'maximize' }, { key: 'maxDrawdown', direction: 'minimize' }]).map((item) => item.index));
         const top = [...grid].sort((a, b) => b.score - a.score).slice(0, 20);
-        this.get('optimizer-results').innerHTML = `<table><thead><tr><th>類型</th><th>初始／新高</th><th>回撤10／20</th><th>權重執行</th><th>強制再平衡</th><th>CAGR</th><th>最大回撤</th><th>Sharpe</th><th>Calmar</th></tr></thead><tbody>${top.map((candidate) => {
+        this.get('optimizer-results').innerHTML = `<table><thead><tr><th>檢視</th><th>類型</th><th>正常槓桿／Normal</th><th>回撤10／20</th><th>權重執行</th><th>再平衡</th><th>CAGR</th><th>最大回撤</th><th>Sharpe</th><th>Calmar</th></tr></thead><tbody>${top.map((candidate) => {
           const index = grid.indexOf(candidate);
-          return `<tr><td>${front.has(index) ? '<strong>Pareto</strong>' : '平衡分數'}</td><td class="data">${candidate.parameters.base}/${candidate.parameters.high}</td><td class="data">${candidate.parameters.dd10}/${candidate.parameters.dd20}</td><td>${allocationPolicyLabel}</td><td>${rebalanceLabel}</td><td class="data">${percent(candidate.metrics.cagr)}</td><td class="data">-${candidate.metrics.maxDrawdown.toFixed(1)}%</td><td class="data">${candidate.metrics.sharpe.toFixed(2)}</td><td class="data">${candidate.metrics.calmar.toFixed(2)}</td></tr>`;
+          const key = escapeHtml(JSON.stringify(candidate.parameters));
+          return `<tr class="optimizer-row"><td><button type="button" class="button optimizer-open" data-optimizer-key="${key}">開啟視覺化</button></td><td>${front.has(index) ? '<strong>Pareto</strong>' : '平衡分數'}</td><td class="data">${candidate.parameters.normal}%</td><td class="data">${candidate.parameters.dd10}%／${candidate.parameters.dd20}%</td><td>${allocationPolicyLabel}</td><td>${rebalanceLabel}</td><td class="data">${percent(candidate.metrics.cagr)}</td><td class="data">-${candidate.metrics.maxDrawdown.toFixed(1)}%</td><td class="data">${candidate.metrics.sharpe.toFixed(2)}</td><td class="data">${candidate.metrics.calmar.toFixed(2)}</td></tr>`;
         }).join('')}</tbody></table>`;
+        this.get('optimizer-results').querySelectorAll<HTMLButtonElement>('[data-optimizer-key]').forEach((open) => {
+          open.addEventListener('click', () => {
+            const key = open.dataset.optimizerKey;
+            const result = key ? this.optimizerCandidates.get(key) : undefined;
+            if (!result) return;
+            this.current = result;
+            this.setStrategyControlsDisabled(true);
+            this.setView('backtest');
+            this.get('strategy-drawer').classList.add('open');
+            this.renderCurrent();
+          });
+        });
         this.get('optimizer-status').textContent = `${grid.length} 組完成 · ${front.size} 組 Pareto 前緣 · ${allocationPolicyLabel} · ${rebalanceLabel}`;
       } catch (error) {
         this.toast(error instanceof Error ? error.message : '最佳化失敗', true);

@@ -8,18 +8,186 @@ import {
   type LineData,
   type Time,
 } from 'lightweight-charts';
-import type { BacktestResult } from '../core/types';
+import type {
+  BacktestResult,
+  DailyPoint,
+  IsoDate,
+  TradeRecord,
+} from '../core/types';
+
+/**
+ * Extra event data is intentionally UI-owned. Core/backtest can add richer
+ * fields later without making this chart renderer depend on that shape.
+ */
+export interface ChartEventStage {
+  date: IsoDate;
+  trigger?: string;
+  reason?: string;
+  capital?: number;
+  value?: number;
+  prototypeShares?: number;
+  leveragedShares?: number;
+  prototypeValue?: number;
+  leveragedValue?: number;
+  prototypeWeight?: number;
+  leveragedWeight?: number;
+  nominalExposure?: number;
+  targetLeveragedWeight?: number;
+}
+
+export interface ChartEvent {
+  id: string;
+  startDate: IsoDate;
+  endDate: IsoDate;
+  peakDate?: IsoDate;
+  startIndex?: number;
+  endIndex?: number;
+  title?: string;
+  stages?: ChartEventStage[];
+  /** Core ExposureEvent names, kept here so app modal code can stay typed. */
+  addTrades?: TradeRecord[];
+  reductionTrades?: TradeRecord[];
+  adds?: ChartEventStage[];
+  reductions?: ChartEventStage[];
+}
+
+export interface ExposureRailSegment {
+  date: IsoDate;
+  exposure: number;
+  color: string;
+}
+
+export interface ChartRenderOptions {
+  events?: ChartEvent[];
+  onEventClick?: (event: ChartEvent) => void;
+}
 
 export interface WorkbenchChart {
-  render(result: BacktestResult): void;
+  render(result: BacktestResult, options?: ChartRenderOptions): void;
+  setEvents(events: ChartEvent[], onEventClick?: (event: ChartEvent) => void): void;
   fit(): void;
   setRange(years: 1 | 3 | 'all'): void;
   setLogarithmic(enabled: boolean): void;
   destroy(): void;
 }
 
+/** An episode is closed only after the first reduction trade. */
+export function isClosedExposureEvent(event: ChartEvent): boolean {
+  return (event.reductionTrades?.length ?? 0) > 0;
+}
+
 const css = (name: string): string =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+const money = (value: number): string =>
+  value.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
+
+const price = (value: number): string =>
+  value.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+const percent = (value: number, digits = 1): string => `${value.toFixed(digits)}%`;
+
+const escapeHtml = (value: string): string =>
+  value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[
+        character
+      ] ?? character,
+  );
+
+/** Pure helper used both by the chart and its non-DOM tests. */
+export function buildExposureRailSegments(points: DailyPoint[]): ExposureRailSegment[] {
+  return points.map((point) => {
+    const ratio = Math.max(0, Math.min(1, (point.nominalExposure - 100) / 100));
+    const hue = 170 - ratio * 145;
+    return {
+      date: point.date,
+      exposure: point.nominalExposure,
+      color: `hsl(${hue} 62% 48%)`,
+    };
+  });
+}
+
+/**
+ * Keep all changing state in the hover card. This deliberately includes
+ * both human-facing Chinese and stable English labels for AI/export users.
+ */
+export function formatChartPointTooltip(point: DailyPoint): string {
+  const rich = point as DailyPoint & {
+    prototypeShares?: number;
+    leveragedShares?: number;
+    prototypePrice?: number;
+    leveragedPrice?: number;
+    targetLeveragedWeight?: number;
+    runningHigh?: number;
+    trough?: number;
+    reboundPct?: number;
+    distanceToHighPct?: number;
+    prototypeReboundPct?: number;
+    leveragedReboundPct?: number;
+    activeRule?: string;
+    activeRuleKey?: string;
+  };
+  const shares = (value: number | undefined): string =>
+    value === undefined ? '—' : value.toLocaleString('zh-TW', { maximumFractionDigits: 4 });
+  return [
+    `<div class="chart-tooltip-title">${escapeHtml(point.date)}</div>`,
+    `<div><span>現值 / Net value</span><b>${money(point.value)}</b></div>`,
+    `<div><span>名目曝險 / Nominal exposure</span><b>${percent(point.nominalExposure)}</b></div>`,
+    `<div><span>原型倉位 / Prototype weight</span><b>${percent(point.prototypeWeight)}</b></div>`,
+    `<div><span>槓桿倉位 / Leveraged weight</span><b>${percent(point.leveragedWeight)}</b></div>`,
+    `<div><span>目標槓桿 / Target leverage</span><b>${percent(point.targetLeveragedWeight)}</b></div>`,
+    `<div><span>原型市值 / Prototype value</span><b>${money(point.prototypeValue)}</b></div>`,
+    `<div><span>槓桿市值 / Leveraged value</span><b>${money(point.leveragedValue)}</b></div>`,
+    `<div><span>現金 / Cash</span><b>${money(point.cash)}</b></div>`,
+    `<div><span>下跌幅度 / Drawdown</span><b>${percent(point.drawdown)}</b></div>`,
+    `<div><span>狀態 / Regime</span><b>${escapeHtml(point.regime)}</b></div>`,
+    `<div><span>持有股數 / Shares</span><b>原型 ${shares(rich.prototypeShares)} · 槓桿 ${shares(rich.leveragedShares)}</b></div>`,
+    ...(rich.prototypePrice === undefined
+      ? []
+      : [`<div><span>原型價格 / Prototype price</span><b>${price(rich.prototypePrice)}</b></div>`]),
+    ...(rich.leveragedPrice === undefined
+      ? []
+      : [`<div><span>槓桿價格 / Leveraged price</span><b>${price(rich.leveragedPrice)}</b></div>`]),
+    ...(rich.runningHigh === undefined
+      ? []
+      : [`<div><span>歷史高點 / Running high</span><b>${money(rich.runningHigh)}</b></div>`]),
+    ...(rich.trough === undefined
+      ? []
+      : [`<div><span>谷底 / Trough</span><b>${money(rich.trough)}</b></div>`]),
+    ...(rich.distanceToHighPct === undefined
+      ? []
+      : [`<div><span>距高點 / Distance to high</span><b>${percent(rich.distanceToHighPct)}</b></div>`]),
+    ...(rich.reboundPct === undefined
+      ? []
+      : [`<div><span>反彈 / Rebound</span><b>${percent(rich.reboundPct)}</b></div>`]),
+    ...(rich.prototypeReboundPct === undefined
+      ? []
+      : [`<div><span>原型反彈 / Prototype rebound</span><b>${percent(rich.prototypeReboundPct)}</b></div>`]),
+    ...(rich.leveragedReboundPct === undefined
+      ? []
+      : [`<div><span>槓桿反彈 / Leveraged rebound</span><b>${percent(rich.leveragedReboundPct)}</b></div>`]),
+    ...(rich.activeRule === undefined && rich.activeRuleKey === undefined
+      ? []
+      : [`<div><span>規則 / Active rule</span><b>${escapeHtml(rich.activeRule ?? rich.activeRuleKey ?? '')}</b></div>`]),
+  ].join('');
+}
+
+const asDate = (time: Time): string => {
+  if (typeof time === 'string') return time;
+  if (typeof time === 'number') return new Date(time * 1000).toISOString().slice(0, 10);
+  return `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')}`;
+};
+
+const richerEvents = (result: BacktestResult): ChartEvent[] => {
+  const enriched = result as BacktestResult & {
+    exposureEvents?: unknown;
+    events?: unknown;
+  };
+  const value = enriched.exposureEvents ?? enriched.events;
+  return Array.isArray(value) ? (value as ChartEvent[]) : [];
+};
 
 export function createWorkbenchChart(
   host: HTMLElement,
@@ -33,6 +201,8 @@ export function createWorkbenchChart(
       textColor: css('--ink-2'),
       fontFamily: css('--font-data'),
       fontSize: 10,
+      // This is Lightweight Charts, not a TradingView widget. Never render TV attribution.
+      attributionLogo: false,
     },
     grid: {
       vertLines: { color: css('--line'), style: LineStyle.Dotted },
@@ -50,59 +220,130 @@ export function createWorkbenchChart(
   const strategy = chart.addLineSeries({
     color: css('--teal'),
     lineWidth: 3,
-    title: '策略',
+    title: '策略 Strategy',
     priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
   });
   const prototype = chart.addLineSeries({
     color: css('--blue'),
     lineWidth: 2,
-    title: '原型 ETF',
+    title: '原型 ETF Prototype',
     priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
   });
   const leveraged = chart.addLineSeries({
     color: css('--orange'),
     lineWidth: 2,
     lineStyle: LineStyle.Dashed,
-    title: '槓桿 ETF',
+    title: '槓桿 ETF Leveraged',
     priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
   });
-  let current: BacktestResult | undefined;
   const series: Array<ISeriesApi<'Line'>> = [strategy, prototype, leveraged];
+  const rail = document.createElement('div');
+  rail.className = 'chart-exposure-overlay';
+  rail.setAttribute('aria-label', '名目曝險軌道 Nominal exposure rail');
+  const eventLayer = document.createElement('div');
+  eventLayer.className = 'chart-event-layer';
+  host.append(rail, eventLayer);
+
+  let current: BacktestResult | undefined;
+  let currentEvents: ChartEvent[] = [];
+  let eventClick: ((event: ChartEvent) => void) | undefined;
+  let frame = 0;
+
+  const scheduleOverlay = (): void => {
+    if (frame) cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      renderOverlay();
+    });
+  };
+
+  const coordinate = (date: IsoDate): number | null =>
+    chart.timeScale().timeToCoordinate(date);
+
+  function renderOverlay(): void {
+    if (!current) return;
+    // Lightweight Charts reserves the right price-axis gutter. Keep the DOM
+    // overlay exactly as wide as the time-scale plot instead of stretching
+    // into that gutter.
+    const plotWidth = chart.timeScale().width();
+    rail.style.right = 'auto';
+    rail.style.width = `${plotWidth}px`;
+    eventLayer.style.right = 'auto';
+    eventLayer.style.width = `${plotWidth}px`;
+    rail.replaceChildren();
+    const segments = buildExposureRailSegments(current.points);
+    segments.forEach((segment, index) => {
+      const left = coordinate(segment.date);
+      if (left === null) return;
+      const next = current?.points[index + 1];
+      const right = next ? coordinate(next.date) : chart.timeScale().width();
+      const span = document.createElement('span');
+      span.className = 'chart-exposure-segment';
+      span.title = `${segment.date} · ${segment.exposure.toFixed(1)}% nominal exposure`;
+      span.style.left = `${Math.max(0, left)}px`;
+      span.style.width = `${Math.max(1, (right ?? left + 2) - left + 0.5)}px`;
+      span.style.background = segment.color;
+      rail.append(span);
+    });
+
+    eventLayer.replaceChildren();
+    currentEvents.forEach((event) => {
+      const start = coordinate(event.startDate);
+      const end = coordinate(event.endDate);
+      if (start === null && end === null) return;
+      const left = Math.max(0, start ?? 0);
+      const right = Math.min(chart.timeScale().width(), end ?? chart.timeScale().width());
+      if (isClosedExposureEvent(event)) {
+        const band = document.createElement('div');
+        band.className = 'chart-event-band';
+        band.style.left = `${Math.min(left, right)}px`;
+        band.style.width = `${Math.max(2, Math.abs(right - left))}px`;
+        band.title = event.title ?? `事件 ${event.startDate} — ${event.endDate}`;
+        eventLayer.append(band);
+      }
+      const markerX = coordinate(event.peakDate ?? event.startDate);
+      if (markerX === null) return;
+      const marker = document.createElement('button');
+      marker.type = 'button';
+      marker.className = 'chart-event-marker';
+      marker.style.left = `${Math.max(0, markerX - 6)}px`;
+      marker.setAttribute('aria-label', event.title ?? `查看事件 ${event.startDate}`);
+      marker.title = event.title ?? `${event.startDate} — ${event.endDate}`;
+      marker.textContent = '•••';
+      marker.addEventListener('click', () => eventClick?.(event));
+      eventLayer.append(marker);
+    });
+  }
 
   chart.subscribeCrosshairMove((parameter) => {
     if (!parameter.time || !current) {
       tooltip.style.display = 'none';
       return;
     }
-    const time = parameter.time;
-    const date =
-      typeof time === 'string'
-        ? time
-        : typeof time === 'number'
-          ? new Date(time * 1000).toISOString().slice(0, 10)
-          : `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')}`;
+    const date = asDate(parameter.time);
     const point = current.points.find((item) => item.date === date);
-    if (!point) return;
+    if (!point) {
+      tooltip.style.display = 'none';
+      return;
+    }
     tooltip.style.display = 'block';
-    tooltip.style.left = `${Math.min((parameter.point?.x ?? 0) + 18, host.clientWidth - 180)}px`;
-    tooltip.style.top = `${Math.max(12, (parameter.point?.y ?? 0) - 58)}px`;
-    tooltip.innerHTML = [
-      `<strong>${point.date}</strong>`,
-      `策略: ${point.value.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}`,
-      `曝險: ${point.nominalExposure.toFixed(1)}%`,
-      `回撤: -${point.drawdown.toFixed(1)}%`,
-      `階段: ${point.regime}`,
-    ].join('<br>');
+    tooltip.style.left = `${Math.min((parameter.point?.x ?? 0) + 18, Math.max(12, host.clientWidth - 310))}px`;
+    tooltip.style.top = `${Math.max(10, (parameter.point?.y ?? 0) - 78)}px`;
+    tooltip.innerHTML = formatChartPointTooltip(point);
   });
 
+  chart.timeScale().subscribeVisibleTimeRangeChange(scheduleOverlay);
   const observer = new ResizeObserver(() => {
     chart.applyOptions({ width: host.clientWidth, height: host.clientHeight });
+    scheduleOverlay();
   });
   observer.observe(host);
 
   return {
-    render(result) {
+    render(result, options = {}) {
       current = result;
+      currentEvents = options.events ?? richerEvents(result);
+      eventClick = options.onEventClick;
       const start = result.initialCapital;
       const toData = (key: 'value' | 'benchmarkPrototype' | 'benchmarkLeveraged'): LineData<Time>[] =>
         result.points.map((point) => ({
@@ -131,13 +372,21 @@ export function createWorkbenchChart(
         })),
       );
       chart.timeScale().fitContent();
+      scheduleOverlay();
+    },
+    setEvents(events, onEventClick) {
+      currentEvents = events;
+      eventClick = onEventClick;
+      scheduleOverlay();
     },
     fit() {
       chart.timeScale().fitContent();
+      scheduleOverlay();
     },
     setRange(years) {
       if (!current || years === 'all') {
         chart.timeScale().fitContent();
+        scheduleOverlay();
         return;
       }
       const last = current.points.at(-1)?.date;
@@ -148,6 +397,7 @@ export function createWorkbenchChart(
         from: from.toISOString().slice(0, 10),
         to: last,
       });
+      scheduleOverlay();
     },
     setLogarithmic(enabled) {
       for (const item of series) {
@@ -155,7 +405,11 @@ export function createWorkbenchChart(
       }
     },
     destroy() {
+      if (frame) cancelAnimationFrame(frame);
       observer.disconnect();
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(scheduleOverlay);
+      rail.remove();
+      eventLayer.remove();
       chart.remove();
     },
   };
