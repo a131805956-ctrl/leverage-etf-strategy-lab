@@ -99,6 +99,10 @@ export function calculateMetrics(
       turnover: 0,
       tradeCount: trades.length,
       totalCosts: 0,
+      returnObservationCount: 0,
+      sharpeAnnualizedExcessReturn: 0,
+      sharpeAnnualizedVolatility: 0,
+      sharpeRiskFreeRate: annualRiskFreeRate,
     };
   }
 
@@ -117,19 +121,28 @@ export function calculateMetrics(
     return point.value / previous.value - 1;
   });
   const annualizedVolatility = deviation(returns) * Math.sqrt(252) * 100;
-  const downside = returns.filter((value) => value < 0);
+  // Sharpe/Sortino use excess daily returns. Subtracting an annual risk-free
+  // rate after arithmetic annualisation is not mathematically equivalent.
+  const dailyRiskFreeRate = (1 + annualRiskFreeRate) ** (1 / 252) - 1;
+  const excessReturns = returns.map((value) => value - dailyRiskFreeRate);
+  const annualizedExcessReturn = mean(excessReturns) * 252 * 100;
+  const sharpeAnnualizedVolatility = deviation(excessReturns) * Math.sqrt(252) * 100;
+  const downside = excessReturns.filter((value) => value < 0);
   const downsideVolatility = deviation(downside) * Math.sqrt(252) * 100;
-  const annualizedReturn = mean(returns) * 252 * 100;
   const sharpe =
-    annualizedVolatility > 0
-      ? (annualizedReturn - annualRiskFreeRate * 100) / annualizedVolatility
+    sharpeAnnualizedVolatility > 0
+      ? (mean(excessReturns) / deviation(excessReturns)) * Math.sqrt(252)
       : 0;
   const sortino =
     downsideVolatility > 0
-      ? (annualizedReturn - annualRiskFreeRate * 100) / downsideVolatility
+      ? annualizedExcessReturn / downsideVolatility
       : 0;
   const episodes = findDrawdownEpisodes(points);
   const maxDrawdown = Math.max(0, ...episodes.map((episode) => episode.depth));
+  const worstDrawdown = episodes.reduce<DrawdownEpisode | undefined>(
+    (worst, episode) => (!worst || episode.depth > worst.depth ? episode : worst),
+    undefined,
+  );
   const calmar = maxDrawdown > 0 ? cagr / maxDrawdown : 0;
   const drawdowns = points.map((point) => point.drawdown / 100);
   const ulcerIndex =
@@ -164,5 +177,12 @@ export function calculateMetrics(
     turnover,
     tradeCount: trades.length,
     totalCosts,
+    returnObservationCount: returns.length,
+    sharpeAnnualizedExcessReturn: annualizedExcessReturn,
+    sharpeAnnualizedVolatility,
+    sharpeRiskFreeRate: annualRiskFreeRate,
+    maxDrawdownPeakDate: worstDrawdown?.peakDate,
+    maxDrawdownTroughDate: worstDrawdown?.troughDate,
+    maxDrawdownRecoveryDate: worstDrawdown?.recoveryDate,
   };
 }

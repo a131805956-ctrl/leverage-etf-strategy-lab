@@ -88,6 +88,7 @@ export class StrategyLabApp {
   private current?: BacktestResult;
   private portfolio?: PortfolioResult;
   private chart?: WorkbenchChart;
+  private optimizerChart?: WorkbenchChart;
   private saved: SavedScenario[] = [];
   private optimizerCandidates = new Map<string, BacktestResult>();
   private lastEventTrigger?: HTMLElement;
@@ -150,7 +151,7 @@ export class StrategyLabApp {
                 </div>
               </div>
               <div class="metric-grid" id="metric-grid">
-                ${['期末資產','年化報酬','最大回撤','Sharpe','平均曝險','交易次數'].map((label, index) => `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value" id="metric-${index}">—</div><div class="metric-foot">${index === 4 ? '原型 1×／槓桿 2×' : '完成回測後更新'}</div></div>`).join('')}
+                ${['期末資產','年化報酬','最大回撤','Sharpe','平均曝險','交易次數'].map((label, index) => `<div class="metric" tabindex="0"><div class="metric-label">${label}</div><div class="metric-value" id="metric-${index}">—</div><div class="metric-foot" id="metric-foot-${index}">${index === 4 ? '原型 1×／槓桿 2×' : '移入查看計算詳情'}</div></div>`).join('')}
               </div>
               <section class="panel chart-panel">
                 <div class="panel-head">
@@ -190,6 +191,11 @@ export class StrategyLabApp {
               <section class="panel"><div class="panel-head"><div class="panel-title">Pareto 候選策略</div><div class="subtitle" id="optimizer-status" role="status" aria-live="polite">等待執行</div></div><div class="table-wrap" id="optimizer-results"><div class="empty">搜尋目前交易對的正常槓桿與下跌加碼階梯；不納入初始比例，也不強制再平衡。</div></div></section>
             </section>
 
+              <section class="panel optimizer-detail" id="optimizer-detail" hidden>
+                <div class="panel-head"><div><div class="panel-title">候選策略視覺化 / Candidate visualization</div><div class="subtitle" id="optimizer-detail-title">唯讀最佳化結果</div></div><button class="button" id="close-optimizer-detail" type="button">返回候選表</button></div>
+                <div class="optimizer-detail-metrics metric-grid" id="optimizer-detail-metrics"></div>
+                <div class="optimizer-detail-layout"><div class="optimizer-detail-main"><section class="panel chart-panel"><div class="panel-head"><div class="legend"><span><i style="background:var(--teal)"></i>策略 / Strategy</span><span><i style="background:var(--blue)"></i>原型 / Prototype</span><span><i style="background:var(--orange)"></i>槓桿 / Leveraged</span></div><div class="chart-tools"><button id="optimizer-chart-log" class="active">LOG</button><button id="optimizer-chart-fit">FIT</button></div></div><div class="chart-host" id="optimizer-chart-host"><div class="chart-tooltip" id="optimizer-chart-tooltip"></div></div></section><section class="panel optimizer-trade-panel"><div class="panel-head"><div class="panel-title">操作與再平衡 / Operations</div><div class="subtitle" id="optimizer-trade-count"></div></div><div class="table-wrap" id="optimizer-trade-table"></div></section></div><div class="optimizer-strategy-preview" id="optimizer-strategy-preview" role="complementary"></div></div>
+              </section>
             <section class="view" id="view-library">
               <div class="page-head"><div><div class="eyebrow">Reproducible research</div><h1>方案庫與版本</h1><p class="subtitle">每個結果保存策略、資料期間與結果指紋，可匯出後跨裝置移轉</p></div><div class="action-row"><button class="button" id="export-library">匯出全部</button><button class="button" id="import-library">匯入 JSON</button><input id="import-file" type="file" accept=".json" hidden></div></div>
               <section class="panel" id="library-list"><div class="empty">尚未儲存方案</div></section>
@@ -250,6 +256,7 @@ export class StrategyLabApp {
 
     const host = this.get<HTMLElement>('chart-host');
     this.chart = createWorkbenchChart(host, this.get<HTMLElement>('chart-tooltip'));
+    this.chart.setLogarithmic(true);
   }
 
   private bindShell(): void {
@@ -270,6 +277,7 @@ export class StrategyLabApp {
     this.get('open-config').addEventListener('click', () => this.get('strategy-drawer').classList.add('open'));
     this.get('close-config').addEventListener('click', () => this.get('strategy-drawer').classList.remove('open'));
     this.get('close-event-modal').addEventListener('click', () => this.closeEventModal());
+    this.get('close-optimizer-detail').addEventListener('click', () => this.closeOptimizerVisualization());
     this.get('event-detail-modal').addEventListener('click', (event) => {
       if (event.target === event.currentTarget) this.closeEventModal();
     });
@@ -281,6 +289,11 @@ export class StrategyLabApp {
     this.get('export-json').addEventListener('click', () => this.exportCurrent());
     this.get('copy-ai').addEventListener('click', () => void this.copyAiPrompt());
     this.get('chart-fit').addEventListener('click', () => this.chart?.fit());
+    this.get('optimizer-chart-fit').addEventListener('click', () => this.optimizerChart?.fit());
+    this.get('optimizer-chart-log').addEventListener('click', () => {
+      this.optimizerChart?.setLogarithmic(true);
+      this.get('optimizer-chart-log').classList.add('active');
+    });
     document.querySelectorAll<HTMLButtonElement>('[data-range]').forEach((button) =>
       button.addEventListener('click', () => {
         const value = button.dataset.range;
@@ -290,7 +303,8 @@ export class StrategyLabApp {
           .forEach((item) => item.classList.toggle('active', item === button));
       }),
     );
-    let logarithmic = false;
+    let logarithmic = true;
+    this.get('chart-log').classList.add('active');
     this.get('chart-log').addEventListener('click', () => {
       logarithmic = !logarithmic;
       this.chart?.setLogarithmic(logarithmic);
@@ -362,6 +376,9 @@ export class StrategyLabApp {
   }
 
   private setView(view: string): void {
+    if (view !== 'optimizer' && !this.get('optimizer-detail').hasAttribute('hidden')) {
+      this.closeOptimizerVisualization();
+    }
     document.querySelectorAll('.view').forEach((item) => item.classList.remove('active'));
     document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', (item as HTMLElement).dataset.view === view));
     this.get(`view-${view}`).classList.add('active');
@@ -485,7 +502,7 @@ export class StrategyLabApp {
       percent(metrics.cagr),
       `-${metrics.maxDrawdown.toFixed(1)}%`,
       metrics.sharpe.toFixed(2),
-      `${metrics.averageExposure.toFixed(0)}%`,
+      `${metrics.averageExposure.toFixed(2)}%`,
       String(metrics.tradeCount),
     ];
     values.forEach((value, index) => {
@@ -494,13 +511,50 @@ export class StrategyLabApp {
       element.classList.toggle('positive', index === 1 && metrics.cagr >= 0);
       element.classList.toggle('negative', index === 2);
     });
+    this.renderMetricDetails(this.current, 'metric-detail-');
     this.chart?.destroy();
     this.chart = createWorkbenchChart(this.get('chart-host'), this.get('chart-tooltip'));
+    this.chart.setLogarithmic(true);
     this.chart.render(this.current, {
       onEventClick: (event) => this.openEventModal(event),
     });
     if (window.innerWidth <= 720) this.chart.setRange(3);
     this.renderTrades();
+  }
+
+  private renderMetricDetails(result: BacktestResult, prefix: string): void {
+    const metrics = result.metrics;
+    const worst = metrics.maxDrawdownPeakDate
+      ? `${metrics.maxDrawdownPeakDate} → ${metrics.maxDrawdownTroughDate ?? '—'}${metrics.maxDrawdownRecoveryDate ? ` → ${metrics.maxDrawdownRecoveryDate}` : '（尚未收復 / ongoing）'}`
+      : '樣本內沒有回撤';
+    const details = [
+      `Initial ${money.format(result.initialCapital)}; total return ${percent(metrics.totalReturn)}`,
+      `CAGR over ${result.startDate} -> ${result.endDate}; ${result.points.length} daily points`,
+      `Max drawdown -${metrics.maxDrawdown.toFixed(2)}%; peak -> trough -> recovery: ${worst}`,
+      `Sharpe uses excess daily return / excess daily deviation * sqrt(252); ${metrics.returnObservationCount ?? Math.max(0, result.points.length - 1)} observations; annual excess ${(metrics.sharpeAnnualizedExcessReturn ?? 0).toFixed(2)}%, annual volatility ${(metrics.sharpeAnnualizedVolatility ?? metrics.annualizedVolatility).toFixed(2)}%`,
+    ];
+    const cards = prefix === 'metric-detail-'
+      ? [...document.querySelectorAll<HTMLElement>('#metric-grid .metric')]
+      : [...document.querySelectorAll<HTMLElement>('#optimizer-detail-metrics .metric')];
+    cards.slice(0, 6).forEach((card, index) => {
+      let element = document.getElementById(`${prefix}${index}`);
+      if (!element) {
+        element = document.createElement('div');
+        element.className = 'metric-detail';
+        element.id = `${prefix}${index}`;
+        element.setAttribute('role', 'tooltip');
+        card.append(element);
+      }
+      const detail = index === 4
+        ? `平均名目曝險 ${metrics.averageExposure.toFixed(2)}%；總換手 ${metrics.turnover.toFixed(2)}%`
+        : index === 5
+          ? `${metrics.tradeCount} 筆操作；交易成本 ${money.format(metrics.totalCosts)}`
+          : details[index] ?? '';
+      element.textContent = detail;
+      card?.setAttribute('title', detail);
+      const foot = card?.querySelector<HTMLElement>('.metric-foot');
+      if (foot) foot.textContent = index === 3 ? '移入查看公式與樣本' : '移入查看完整計算資料';
+    });
   }
 
   private renderTrades(): void {
@@ -526,6 +580,64 @@ export class StrategyLabApp {
     this.get('trade-table').innerHTML = `<table><thead><tr><th>日期<br><span class="th-en">Date</span></th><th>原因<br><span class="th-en">Reason</span></th><th>標的</th><th>買／賣股數<br><span class="th-en">Shares ±</span></th><th>成交價<br><span class="th-en">Price</span></th><th>成交額<br><span class="th-en">Notional</span></th><th>手續費<br><span class="th-en">Cost</span></th><th>交易後現值<br><span class="th-en">Value after</span></th><th>目標槓桿</th><th>說明</th></tr></thead><tbody>${rows
       .map((trade) => `<tr><td>${trade.date}</td><td><span class="tag tag-${trade.reason.toLowerCase()}">${trade.reason}</span></td><td><div>原型</div><div>槓桿</div></td><td class="data"><div>${shareSummary(trade, 'prototypeSharesBought', 'prototypeSharesSold')}</div><div>${shareSummary(trade, 'leveragedSharesBought', 'leveragedSharesSold')}</div></td><td class="data"><div>${price(trade, 'prototypePrice')}</div><div>${price(trade, 'leveragedPrice')}</div></td><td class="data">${money.format(trade.tradedValue)}</td><td class="data">${money.format(trade.cost)}</td><td class="data"><div>${price(trade, 'prototypeValueAfter')}</div><div>${price(trade, 'leveragedValueAfter')}</div><strong>${price(trade, 'totalValueAfter')}</strong></td><td class="data">${trade.targetLeveragedWeight.toFixed(0)}%</td><td>${escapeHtml(trade.note)}</td></tr>`)
       .join('')}</tbody></table>`;
+  }
+
+  private renderOptimizerVisualization(result: BacktestResult): void {
+    this.setView('optimizer');
+    this.root.classList.add('optimizer-preview-active');
+    this.get('optimizer-detail').removeAttribute('hidden');
+    this.get('optimizer-detail-title').textContent = `${result.pairId} · ${result.startDate} → ${result.endDate} · 唯讀策略預覽`;
+    const metricLabels = ['期末資產 / Final value', '年化報酬 / CAGR', '最大回撤 / Max drawdown', 'Sharpe', '平均曝險 / Avg exposure', '交易次數 / Trades'];
+    this.get('optimizer-detail-metrics').innerHTML = metricLabels.map((label, index) => `<div class="metric" tabindex="0"><div class="metric-label">${label}</div><div class="metric-value" id="optimizer-metric-${index}">—</div><div class="metric-foot">移入查看計算詳情</div><div class="metric-detail" id="optimizer-metric-detail-${index}" role="tooltip"></div></div>`).join('');
+    const metrics = result.metrics;
+    [
+      money.format(metrics.finalValue),
+      percent(metrics.cagr),
+      `-${metrics.maxDrawdown.toFixed(2)}%`,
+      metrics.sharpe.toFixed(3),
+      `${metrics.averageExposure.toFixed(2)}%`,
+      String(metrics.tradeCount),
+    ].forEach((value, index) => {
+      const element = this.get(`optimizer-metric-${index}`);
+      element.textContent = value;
+      element.classList.toggle('positive', index === 1 && metrics.cagr >= 0);
+      element.classList.toggle('negative', index === 2);
+    });
+    this.renderMetricDetails(result, 'optimizer-metric-detail-');
+    this.optimizerChart?.destroy();
+    this.optimizerChart = createWorkbenchChart(this.get('optimizer-chart-host'), this.get('optimizer-chart-tooltip'));
+    this.optimizerChart.setLogarithmic(true);
+    this.optimizerChart.render(result, { onEventClick: (event) => this.openEventModal(event) });
+    this.renderOptimizerTrades(result);
+    this.renderOptimizerStrategy(result);
+  }
+
+  private renderOptimizerTrades(result: BacktestResult): void {
+    this.get('optimizer-trade-count').textContent = `${result.trades.length} 筆操作 · 成本 ${money.format(result.metrics.totalCosts)}`;
+    const rows = result.trades.slice().reverse();
+    const amount = (trade: typeof rows[number], key: string): string => {
+      const value = (trade as unknown as Record<string, unknown>)[key];
+      return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(3) : '—';
+    };
+    const value = (trade: typeof rows[number], key: string): string => {
+      const item = (trade as unknown as Record<string, unknown>)[key];
+      return typeof item === 'number' && Number.isFinite(item) ? money.format(item) : '—';
+    };
+    this.get('optimizer-trade-table').innerHTML = `<table><thead><tr><th>日期 / Date</th><th>原因 / Reason</th><th>買入股數<br>Shares bought</th><th>賣出股數<br>Shares sold</th><th>成交金額 / Notional</th><th>成本 / Cost</th><th>交易後市值 / Value after</th><th>目標槓桿 / Target</th></tr></thead><tbody>${rows.map((trade) => `<tr><td>${trade.date}</td><td><span class="tag tag-${trade.reason.toLowerCase()}">${trade.reason}</span></td><td class="data">原型 ${amount(trade, 'prototypeSharesBought')}<br>槓桿 ${amount(trade, 'leveragedSharesBought')}</td><td class="data">原型 ${amount(trade, 'prototypeSharesSold')}<br>槓桿 ${amount(trade, 'leveragedSharesSold')}</td><td class="data">${money.format(trade.tradedValue)}</td><td class="data">${money.format(trade.cost)}</td><td class="data">${value(trade, 'totalValueAfter')}</td><td class="data">${trade.targetLeveragedWeight.toFixed(2)}%</td></tr>`).join('')}</tbody></table>`;
+  }
+
+  private renderOptimizerStrategy(result: BacktestResult): void {
+    const strategy = result.strategy;
+    const drawdowns = strategy.drawdownRules.map((rule) => `${rule.threshold}% 回撤 → ${rule.leveragedWeight}% 槓桿`).join('<br>') || '無';
+    const reductions = (strategy.reductionRules ?? []).map((rule) => `${rule.threshold}% → ${rule.leveragedWeight}% 槓桿`).join('<br>') || '無（創新高模式自然奔騰）';
+    this.get('optimizer-strategy-preview').innerHTML = `<div class="optimizer-strategy-head"><div class="eyebrow">Strategy snapshot / 策略快照</div><h2>唯讀參數</h2><p>最佳化結果沿用目前最新策略；此頁不能修改回測頁表單。</p></div><dl class="strategy-snapshot"><div><dt>正常槓桿 / Normal</dt><dd>${(strategy.normalLeveragedWeight ?? strategy.baseLeveragedWeight).toFixed(2)}%</dd></div><div><dt>配置執行 / Allocation</dt><dd>${strategy.allocationPolicy}</dd></div><div><dt>下跌加碼 / Drawdown adds</dt><dd>${drawdowns}</dd></div><div><dt>反彈減倉 / Reductions</dt><dd>${reductions}</dd></div><div><dt>參考 / Reference</dt><dd>${strategy.reductionReference ?? 'prototype-rebound'}</dd></div><div><dt>再平衡 / Rebalance</dt><dd>${strategy.rebalance.mode}${strategy.rebalance.intervalDays ? ` · ${strategy.rebalance.intervalDays} days` : ''}</dd></div><div><dt>股息 / Dividend</dt><dd>${strategy.dividendMode}</dd></div><div><dt>執行 / Execution</dt><dd>${strategy.execution}</dd></div></dl>`;
+  }
+
+  private closeOptimizerVisualization(): void {
+    this.optimizerChart?.destroy();
+    this.optimizerChart = undefined;
+    this.get('optimizer-detail').setAttribute('hidden', '');
+    this.root.classList.remove('optimizer-preview-active');
   }
 
   private openEventModal(event: ChartEvent): void {
@@ -730,11 +842,7 @@ export class StrategyLabApp {
             const key = open.dataset.optimizerKey;
             const result = key ? this.optimizerCandidates.get(key) : undefined;
             if (!result) return;
-            this.current = result;
-            this.setStrategyControlsDisabled(true);
-            this.setView('backtest');
-            this.get('strategy-drawer').classList.add('open');
-            this.renderCurrent();
+            this.renderOptimizerVisualization(result);
           });
         });
         this.get('optimizer-status').textContent = `${grid.length} 組完成 · ${front.size} 組 Pareto 前緣 · ${allocationPolicyLabel} · ${rebalanceLabel}`;

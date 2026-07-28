@@ -297,6 +297,12 @@ export function runBacktest(input: BacktestInput): BacktestResult {
   const normalLeveragedTarget =
     strategy.normalLeveragedWeight ?? strategy.highLeveragedWeight;
   let activeRuleKey: string | undefined;
+  // One running high defines one pullback episode. A rule may advance to a
+  // deeper rung once, but it must not fire again when price oscillates around
+  // that rung before a new high resets the episode.
+  let ruleEpisodeHighDate: IsoDate | undefined;
+  let triggeredEpisodeRules = new Set<string>();
+  const episodeRuleMemoryEnabled = strategy.reductionRules !== undefined;
   let pending: PendingTrade | undefined = {
     targetLeveragedWeight: strategy.baseLeveragedWeight,
     reason: 'INITIAL',
@@ -503,12 +509,33 @@ export function runBacktest(input: BacktestInput): BacktestResult {
       leveragedReboundPct,
     };
 
+    if (ruleEpisodeHighDate !== regime.runningHighDate) {
+      ruleEpisodeHighDate = regime.runningHighDate;
+      triggeredEpisodeRules = new Set<string>();
+    }
+
     const decision = resolveAllocationRule(strategy, regime);
-    const ruleChanged = decision?.ruleKey !== activeRuleKey;
+    const repeatEpisodeRule =
+      episodeRuleMemoryEnabled &&
+      decision !== undefined &&
+      decision.reason !== 'NEW_HIGH' &&
+      triggeredEpisodeRules.has(decision.ruleKey);
+    const transition = repeatEpisodeRule ? undefined : decision;
+    const ruleChanged =
+      transition !== undefined && transition.ruleKey !== activeRuleKey;
     const previousRuleFloor = currentRuleFloor;
-    activeRuleKey = decision?.ruleKey;
-    if (decision && ruleChanged) {
-      currentRuleFloor = decision.leveragedWeight;
+    // Preserve legacy re-entry semantics for saved scenarios that predate the
+    // explicit reductionRules ledger. New strategies retain their active rung
+    // throughout the high-anchored episode.
+    if (!decision && !episodeRuleMemoryEnabled) {
+      activeRuleKey = undefined;
+    }
+    if (transition && ruleChanged) {
+      activeRuleKey = transition.ruleKey;
+      currentRuleFloor = transition.leveragedWeight;
+      if (transition.reason !== 'NEW_HIGH') {
+        triggeredEpisodeRules.add(transition.ruleKey);
+      }
     }
     const next = selected[index + 1];
 
@@ -573,23 +600,23 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         note: `實際權重偏離 ${Math.abs(leveragedWeight - currentRuleFloor).toFixed(2)} 個百分點`,
         policy: 'exact-target',
       };
-    } else if (decision && ruleChanged) {
+    } else if (transition && ruleChanged) {
       const reductionPolicy =
         strategy.allocationPolicy === 'exact-target'
           ? 'exact-target'
-          : decision.reason === 'NEW_HIGH' ||
-              (decision.reason === 'RECOVERY' && strategy.reductionRules?.length)
+          : transition.reason === 'NEW_HIGH' ||
+              (transition.reason === 'RECOVERY' && strategy.reductionRules?.length)
             ? 'reduce-excess'
             : strategy.allocationPolicy;
       const closesAddOnEpisode =
-        decision.reason !== 'NEW_HIGH' ||
+        transition.reason !== 'NEW_HIGH' ||
         (strategy.normalLeveragedWeight !== undefined
           ? Math.abs(previousRuleFloor - normalLeveragedTarget) > TRADE_TOLERANCE
           : previousRuleFloor > normalLeveragedTarget + TRADE_TOLERANCE);
       if (closesAddOnEpisode) {
         pending = {
-          targetLeveragedWeight: decision.leveragedWeight,
-          reason: decision.reason,
+          targetLeveragedWeight: transition.leveragedWeight,
+          reason: transition.reason,
           note: `${regime.regime}：距前高 ${regime.distanceToHighPct.toFixed(2)}%`,
           policy: reductionPolicy,
         };

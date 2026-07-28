@@ -481,6 +481,24 @@ describe('runBacktest', () => {
     ).toEqual(['2024-01-03', '2024-01-05']);
   });
 
+  it('fires each modern drawdown rung once per running-high episode', () => {
+    const original = reenteredRuleInput();
+    const result = runBacktest({
+      ...original,
+      strategy: {
+        ...original.strategy,
+        reductionRules: [],
+        reductionReference: 'new-high-decline',
+      },
+    });
+
+    expect(
+      result.trades
+        .filter((trade) => trade.reason === 'DRAWDOWN')
+        .map((trade) => trade.date),
+    ).toEqual(['2024-01-03']);
+  });
+
   it('keeps exact-target allocation behavior for changed rule events', () => {
     const result = runBacktest(alreadyAboveFloorInput('exact-target'));
     const drawdownTrade = result.trades.find(
