@@ -39,6 +39,24 @@ describe('calculateMetrics', () => {
     expect(metrics.averageExposure).toBe(100);
     expect(metrics.tradeCount).toBe(0);
     expect(metrics.totalCosts).toBe(0);
+    expect(metrics.returnObservationCount).toBe(3);
+    expect(metrics.maxDrawdownPeakDate).toBe('2024-01-02');
+    expect(metrics.maxDrawdownTroughDate).toBe('2024-01-03');
+    expect(metrics.maxDrawdownRecoveryDate).toBe('2024-01-04');
+  });
+
+  it('calculates Sharpe from daily excess returns and exposes its inputs', () => {
+    const metrics = calculateMetrics(points, [], 100, 0.05);
+    const dailyRf = (1.05 ** (1 / 252)) - 1;
+    const returns = [0.2, -0.25, 130 / 90 - 1].map((value) => value - dailyRf);
+    const average = returns.reduce((sum, value) => sum + value, 0) / returns.length;
+    const standardDeviation = Math.sqrt(
+      returns.reduce((sum, value) => sum + (value - average) ** 2, 0) /
+        (returns.length - 1),
+    );
+    expect(metrics.sharpe).toBeCloseTo((average / standardDeviation) * Math.sqrt(252), 10);
+    expect(metrics.sharpeRiskFreeRate).toBe(0.05);
+    expect(metrics.sharpeAnnualizedVolatility).toBeGreaterThan(0);
   });
 
   it('counts one dividend reinvestment from its actual purchase and cost', () => {

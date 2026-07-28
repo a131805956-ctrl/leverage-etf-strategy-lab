@@ -220,6 +220,14 @@ export interface PerformanceMetrics {
   turnover: number;
   tradeCount: number;
   totalCosts: number;
+  /** Transparent inputs used by Sharpe and drawdown audit tooltips. */
+  returnObservationCount?: number;
+  sharpeAnnualizedExcessReturn?: number;
+  sharpeAnnualizedVolatility?: number;
+  sharpeRiskFreeRate?: number;
+  maxDrawdownPeakDate?: IsoDate;
+  maxDrawdownTroughDate?: IsoDate;
+  maxDrawdownRecoveryDate?: IsoDate;
 }
 
 export interface BacktestResult {

@@ -272,18 +272,18 @@ export function createWorkbenchChart(
       horzLines: { color: css('--line'), style: LineStyle.Dotted },
     },
     crosshair: { mode: CrosshairMode.Normal },
-    // Let the document own vertical wheel/touch scrolling. Chart zoom and
-    // horizontal panning remain available through the range buttons so a
-    // pointer over the plot never traps the page at the chart boundary.
+    // Lightweight Charts owns plot gestures: wheel (middle mouse) zooms and
+    // press-drag pans the time range. The surrounding page remains scrollable
+    // outside the plot and the strategy drawer keeps its own vertical scroll.
     handleScroll: {
       mouseWheel: false,
-      pressedMouseMove: false,
-      horzTouchDrag: false,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
       vertTouchDrag: false,
     },
     handleScale: {
-      mouseWheel: false,
-      pinch: false,
+      mouseWheel: true,
+      pinch: true,
       axisPressedMouseMove: { time: false, price: false },
       axisDoubleClickReset: { time: true, price: true },
     },
