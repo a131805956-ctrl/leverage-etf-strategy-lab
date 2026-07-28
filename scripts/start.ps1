@@ -20,5 +20,5 @@ if ($refresh) {
 }
 
 npm run build
-npm run preview
+& (Join-Path $PSScriptRoot "serve-funnel.ps1")
 
